@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from openai import OpenAI
 from config import settings
 import logging
@@ -8,9 +8,8 @@ logger = logging.getLogger(__name__)
 class Embedder:
     """Wrapper for OpenAI embeddings with batch processing support."""
 
-    def __init__(self, api_key: str = None, model: str = settings.EMBEDDING_MODEL):
-        api_key = api_key or settings.OPENAI_API_KEY or "missing-key"
-        self.client = OpenAI(api_key=api_key)
+    def __init__(self, client: Optional[OpenAI] = None, model: str = settings.EMBEDDING_MODEL):
+        self.client = client or OpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = model
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:

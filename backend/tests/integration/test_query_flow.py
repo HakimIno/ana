@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 from main import app
 import os
 import io
@@ -12,30 +12,26 @@ class TestQueryFlow:
     def test_full_flow_success(self, tmp_path):
         """Test uploading a file and then querying it."""
         # Override storage for test
-        os.environ["STORAGE_DIR"] = str(tmp_path / "uploads")
-        os.environ["VECTOR_STORE_DIR"] = str(tmp_path / "vectors")
+        os.environ["QDRANT_PATH"] = str(tmp_path / "qdrant")
         
-        # 1. Mock OpenAI for both Embedder and Agent
-        with patch("modules.rag.embedder.OpenAI") as mock_emb_openai, \
-             patch("modules.llm.analyst_agent.OpenAI") as mock_agent_openai:
-            
-            # Setup Embedder Mock
-            mock_emb_client = MagicMock()
-            mock_emb_openai.return_value = mock_emb_client
-            def mock_create(*args, **kwargs):
-                texts = kwargs.get("input", [])
-                resp = MagicMock()
-                resp.data = [MagicMock(embedding=[0.1] * 1536) for _ in texts]
-                return resp
-            mock_emb_client.embeddings.create.side_effect = mock_create
-
-            # Setup Agent Mock
-            mock_agent_client = MagicMock()
-            mock_agent_openai.return_value = mock_agent_client
-            mock_llm_response = MagicMock()
-            mock_llm_response.choices = [MagicMock(message=MagicMock(content="The profit is high."))]
-            mock_agent_client.chat.completions.create.return_value = mock_llm_response
-
+        # 1. Setup Mocks
+        mock_openai_client = MagicMock()
+        
+        # Mock Embeddings
+        mock_emb_response = MagicMock()
+        mock_emb_response.data = [MagicMock(embedding=[0.1] * 1536)]
+        mock_openai_client.embeddings.create.return_value = mock_emb_response
+        
+        # Mock Chat Completion
+        mock_llm_response = MagicMock()
+        mock_llm_response.choices = [MagicMock(message=MagicMock(content="The profit is high."))]
+        mock_openai_client.chat.completions.create.return_value = mock_llm_response
+        
+        # 2. Inject Dependency Override
+        from main import get_openai_client
+        app.dependency_overrides[get_openai_client] = lambda: mock_openai_client
+        
+        try:
             client = TestClient(app)
 
             # 3. Create a dummy CSV file
@@ -52,11 +48,13 @@ class TestQueryFlow:
             assert "profit" in query_resp.json()["answer"].lower()
         
             # Verify LLM was called with the correct prompt context containing metrics
-            mock_agent_client.chat.completions.create.assert_called_once()
-            args, kwargs = mock_agent_client.chat.completions.create.call_args
+            mock_openai_client.chat.completions.create.assert_called_once()
+            args, kwargs = mock_openai_client.chat.completions.create.call_args
             prompt_content = kwargs["messages"][1]["content"]
             assert "revenue" in prompt_content
             assert "cost" in prompt_content
+        finally:
+            app.dependency_overrides.clear()
 
     def test_root_endpoint(self):
         response = client.get("/")

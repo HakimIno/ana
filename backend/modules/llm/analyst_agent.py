@@ -1,9 +1,10 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from modules.llm.prompts import ANALYST_SYSTEM_PROMPT, QUERY_PROMPT_TEMPLATE
 from modules.analytics.financial_calculator import FinancialCalculator
 from modules.rag.vector_store import VectorStore
 from modules.rag.embedder import Embedder
+from modules.rag.retriever import Retriever
 from config import settings
 import logging
 import json
@@ -13,12 +14,17 @@ logger = logging.getLogger(__name__)
 class AnalystAgent:
     """Main LLM orchestration for financial analysis."""
 
-    def __init__(self):
-        api_key = settings.OPENAI_API_KEY or "missing-key"
-        self.client = OpenAI(api_key=api_key)
+    def __init__(self, client: Optional[OpenAI] = None, retriever: Optional[Retriever] = None):
+        self.client = client or OpenAI(api_key=settings.OPENAI_API_KEY)
         self.calculator = FinancialCalculator()
-        self.vector_store = VectorStore()
-        self.embedder = Embedder()
+        
+        # If retriever is not provided, initialize standard stack
+        if retriever:
+            self.retriever = retriever
+        else:
+            embedder = Embedder(client=self.client)
+            vector_store = VectorStore()
+            self.retriever = Retriever(embedder=embedder, vector_store=vector_store)
 
     def _prepare_metrics_context(self, data: List[Dict[str, Any]]) -> str:
         """Calculate summary metrics for the LLM context using Polars to prevent LLM math."""
@@ -41,13 +47,7 @@ class AnalystAgent:
         Orchestrate the analysis by combining RAG, python math, and LLM interpretation.
         """
         # 1. Get RAG context
-        try:
-            query_embedding = self.embedder.get_embedding(user_query)
-            rag_results = self.vector_store.query(query_embedding, n_results=5)
-            rag_context = "\n".join(rag_results["documents"][0])
-        except Exception as e:
-            logger.warning(f"RAG lookup failed: {e}")
-            rag_context = "Could not retrieve document context."
+        rag_context = self.retriever.get_context(user_query, top_k=5)
 
         # 2. Get calculated metrics
         metrics_context = self._prepare_metrics_context(data_context) if data_context else "No table data provided."

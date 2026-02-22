@@ -1,6 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from openai import OpenAI
 from typing import List
+import logging
 from config import settings
 from models.request_models import QueryRequest, FileUploadResponse
 from models.response_models import AnalysisResponse, FileInfo
@@ -10,6 +12,8 @@ from modules.rag.chunker import Chunker
 from modules.rag.embedder import Embedder
 from modules.rag.vector_store import VectorStore
 from modules.llm.analyst_agent import AnalystAgent
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -27,20 +31,27 @@ app.add_middleware(
 )
 
 # Helper for dependency injection
-def get_analyst_agent():
-    return AnalystAgent()
+def get_openai_client():
+    return OpenAI(api_key=settings.OPENAI_API_KEY)
+
+def get_analyst_agent(client: OpenAI = Depends(get_openai_client)):
+    return AnalystAgent(client=client)
 
 @app.get("/")
 async def root():
     return {"message": f"Welcome to {settings.PROJECT_NAME}", "version": settings.VERSION}
 
 @app.post("/upload", response_model=FileUploadResponse)
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    client: OpenAI = Depends(get_openai_client)
+):
     """Upload a file, parse it, and index it for RAG."""
     parser = ExcelParser()
     file_manager = FileManager()
     chunker = Chunker()
     vector_store = VectorStore()
+    
     # 1. Save file
     content = await file.read()
     try:
@@ -55,7 +66,8 @@ async def upload_file(file: UploadFile = File(...)):
         all_chunks = chunks + [summary_chunk]
         
         # 4. Generate embeddings and store
-        embedder = Embedder()
+        embedder = Embedder(client=client)
+        
         texts = [c["content"] for c in all_chunks]
         embeddings = embedder.get_embeddings(texts)
         ids = [f"{file.filename}_{i}" for i in range(len(all_chunks))]
@@ -70,6 +82,7 @@ async def upload_file(file: UploadFile = File(...)):
             message="File uploaded and indexed successfully"
         )
     except Exception as e:
+        logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/query", response_model=AnalysisResponse)
