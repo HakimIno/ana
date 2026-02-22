@@ -11,6 +11,17 @@ class Settings(BaseSettings):
     
     # API Keys
     OPENAI_API_KEY: Optional[str] = None
+    ZAI_API_KEY: Optional[str] = None
+    
+    # Model Settings
+    CHAT_PROVIDER: str = "openai"       # options: "openai", "zai"
+    EMBEDDING_PROVIDER: str = "openai" # options: "openai", "zai"
+    
+    OPENAI_MODEL: str = "gpt-4o"
+    GLM_MODEL: str = "glm-5"
+    
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    ZAI_EMBEDDING_MODEL: str = "embedding-3"
     
     # Storage Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
@@ -19,7 +30,6 @@ class Settings(BaseSettings):
     
     # RAG Settings
     QDRANT_COLLECTION_NAME: str = "business_data"
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
     
     # Model configuration
     model_config = SettingsConfigDict(

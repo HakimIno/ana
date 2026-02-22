@@ -20,6 +20,7 @@ dependencies = [
     "python-multipart>=0.0.12",
     "python-dotenv>=1.0.0",
     "structlog>=24.0.0",
+    "zai-sdk>=0.2.2",
 ]
 
 [project.optional-dependencies]

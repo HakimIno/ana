@@ -1,5 +1,6 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from openai import OpenAI
+from zai import ZaiClient
 from modules.llm.prompts import ANALYST_SYSTEM_PROMPT, QUERY_PROMPT_TEMPLATE
 from modules.analytics.financial_calculator import FinancialCalculator
 from modules.rag.vector_store import VectorStore
@@ -16,15 +17,26 @@ logger = logging.getLogger(__name__)
 class AnalystAgent:
     """Main LLM orchestration for financial analysis."""
 
-    def __init__(self, client: Optional[OpenAI] = None, retriever: Optional[Retriever] = None):
-        self.client = client or OpenAI(api_key=settings.OPENAI_API_KEY)
+    def __init__(self, client=None, retriever: Retriever = None):
+        """Initialize the AnalystAgent with a client and retriever."""
+        if client:
+            self.client = client
+        else:
+            if settings.CHAT_PROVIDER == "zai":
+                logger.info(f"Using Z.AI provider with model {settings.GLM_MODEL}")
+                self.client = ZaiClient(api_key=settings.ZAI_API_KEY)
+            else:
+                logger.info(f"Using OpenAI provider with model {settings.OPENAI_MODEL}")
+                self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+                
         self.calculator = FinancialCalculator()
+        self.model_name = settings.GLM_MODEL if settings.CHAT_PROVIDER == "zai" else settings.OPENAI_MODEL
         
         # If retriever is not provided, initialize standard stack
         if retriever:
             self.retriever = retriever
         else:
-            embedder = Embedder(client=self.client)
+            embedder = Embedder()
             vector_store = VectorStore()
             self.retriever = Retriever(embedder=embedder, vector_store=vector_store)
 
@@ -63,26 +75,31 @@ class AnalystAgent:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
+            # GLM-5/Z.AI works similarly to OpenAI
+            create_params = {
+                "model": self.model_name,
+                "messages": [
                     {"role": "system", "content": ANALYST_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
+                "temperature": 0.2,
+            }
             
-            # 4. Parse and Validate
-            return OutputParser.parse_analysis(
-                response.choices[0].message.content, 
-                rag_context=rag_context
-            )
+            # OpenAI supports forced JSON mode, check if we're using OpenAI
+            if settings.CHAT_PROVIDER == "openai":
+                create_params["response_format"] = {"type": "json_object"}
             
+            response = self.client.chat.completions.create(**create_params)
+            
+            raw_content = response.choices[0].message.content
+            logger.info("Successfully received LLM analysis")
+            
+            return OutputParser.parse_analysis(raw_content, rag_context=rag_context)
+
         except Exception as e:
             logger.error(f"LLM request/analysis failed: {e}")
             return AnalysisResponse(
-                answer=f"Sorry, I encountered an error during analysis: {str(e)}",
+                answer=f"Analysis failed due to a system error: {str(e)}",
                 key_metrics={},
                 recommendations=[],
                 risks=[],

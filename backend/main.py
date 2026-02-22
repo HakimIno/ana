@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-from typing import List
+from typing import List, Any
 import logging
 from config import settings
 from models.request_models import QueryRequest, FileUploadResponse
@@ -31,10 +31,21 @@ app.add_middleware(
 )
 
 # Helper for dependency injection
-def get_openai_client():
+def get_llm_client():
+    """Client for Chat/Analysis (Z.AI requested)."""
+    if settings.CHAT_PROVIDER == "zai":
+        from zai import ZaiClient
+        return ZaiClient(api_key=settings.ZAI_API_KEY)
     return OpenAI(api_key=settings.OPENAI_API_KEY)
 
-def get_analyst_agent(client: OpenAI = Depends(get_openai_client)):
+def get_embedding_client():
+    """Client for Embeddings (OpenAI requested)."""
+    if settings.EMBEDDING_PROVIDER == "zai":
+        from zai import ZaiClient
+        return ZaiClient(api_key=settings.ZAI_API_KEY)
+    return OpenAI(api_key=settings.OPENAI_API_KEY)
+
+def get_analyst_agent(client: Any = Depends(get_llm_client)):
     return AnalystAgent(client=client)
 
 @app.get("/")
@@ -44,7 +55,7 @@ async def root():
 @app.post("/upload", response_model=FileUploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    client: OpenAI = Depends(get_openai_client)
+    client: Any = Depends(get_embedding_client)
 ):
     """Upload a file, parse it, and index it for RAG."""
     parser = ExcelParser()
