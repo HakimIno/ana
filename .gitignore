@@ -8,6 +8,11 @@ __pycache__/
 .env
 .env.*
 !.env.example
+build/
+dist/
+downloads/
+*.egg-info/
+MANIFEST
 
 # Project Specific
 backend/uploads/
@@ -21,3 +26,5 @@ backend/backend.db
 .DS_Store
 .vscode/
 .idea/
+*.swp
+*.swo
