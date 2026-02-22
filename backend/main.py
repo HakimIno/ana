@@ -98,8 +98,7 @@ async def query_analyst(request: QueryRequest, agent: AnalystAgent = Depends(get
             parsing_result = parser.parse_file(latest_file["path"])
             data_context = parsing_result["data"]
 
-        answer = agent.analyze(request.question, data_context=data_context)
-        return AnalysisResponse(answer=answer)
+        return agent.analyze(request.question, data_context=data_context)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

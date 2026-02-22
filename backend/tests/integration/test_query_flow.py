@@ -3,6 +3,7 @@ from unittest.mock import MagicMock
 from main import app
 import os
 import io
+import json
 
 client = TestClient(app)
 
@@ -24,7 +25,14 @@ class TestQueryFlow:
         
         # Mock Chat Completion
         mock_llm_response = MagicMock()
-        mock_llm_response.choices = [MagicMock(message=MagicMock(content="The profit is high."))]
+        llm_json = {
+            "answer": "The profit is high.",
+            "key_metrics": {"Profit": "High"},
+            "recommendations": ["Expand"],
+            "risks": ["Competition"],
+            "confidence_score": 0.9
+        }
+        mock_llm_response.choices = [MagicMock(message=MagicMock(content=json.dumps(llm_json)))]
         mock_openai_client.chat.completions.create.return_value = mock_llm_response
         
         # 2. Inject Dependency Override

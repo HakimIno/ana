@@ -8,6 +8,8 @@ from modules.rag.retriever import Retriever
 from config import settings
 import logging
 import json
+from models.response_models import AnalysisResponse
+from modules.llm.output_parser import OutputParser
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +44,10 @@ class AnalystAgent:
             
         return json.dumps(metrics, indent=2)
 
-    def analyze(self, user_query: str, data_context: List[Dict[str, Any]] = None) -> str:
+    def analyze(self, user_query: str, data_context: List[Dict[str, Any]] = None) -> AnalysisResponse:
         """
         Orchestrate the analysis by combining RAG, python math, and LLM interpretation.
+        Returns a structured AnalysisResponse.
         """
         # 1. Get RAG context
         rag_context = self.retriever.get_context(user_query, top_k=5)
@@ -61,14 +64,28 @@ class AnalystAgent:
 
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o", # Using a strong reasoning model
+                model="gpt-4o",
                 messages=[
                     {"role": "system", "content": ANALYST_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2 # Lower temperature for analytical consistency
+                temperature=0.1,
+                response_format={"type": "json_object"}
             )
-            return response.choices[0].message.content
+            
+            # 4. Parse and Validate
+            return OutputParser.parse_analysis(
+                response.choices[0].message.content, 
+                rag_context=rag_context
+            )
+            
         except Exception as e:
-            logger.error(f"LLM generation failed: {e}")
-            return f"Sorry, I encountered an error while analyzing the data: {str(e)}"
+            logger.error(f"LLM request/analysis failed: {e}")
+            return AnalysisResponse(
+                answer=f"Sorry, I encountered an error during analysis: {str(e)}",
+                key_metrics={},
+                recommendations=[],
+                risks=[],
+                confidence_score=0.0,
+                status="error"
+            )
