@@ -4,164 +4,224 @@ import { useState, useEffect } from "react";
 import FileUpload from "@/components/FileUpload/FileUpload";
 import ChatInterface from "@/components/ChatInterface/ChatInterface";
 
+import Tree5 from "@/components/Tree5";
+import TreeDraw from "@/components/Treedraw";
+import Image from "next/image";
+
 export default function Home() {
   const [currentFile, setCurrentFile] = useState<any>(null);
 
+  useEffect(() => {
+    // Fetch latest file from backend if exists
+    const fetchFiles = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/files");
+        if (response.ok) {
+          const files = await response.json();
+          if (files && files.length > 0) {
+            // Sort by created_at descending and pick the latest
+            const sortedFiles = files.sort((a: any, b: any) => b.created_at - a.created_at);
+            setCurrentFile(sortedFiles[0]);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch files:", err);
+      }
+    };
+    fetchFiles();
+  }, []);
+
   return (
-    <div className="dashboard-container">
-      <aside className="glass-panel sidebar">
-        <div className="brand">
-          <div className="brand-logo">📊</div>
-          <h2>AI Analyst</h2>
+    <div className="app-container">
+      <aside className="sidebar">
+        <div className="branding">
+          <Image src="/book.gif" alt="Book" width={32} height={32} />
+          <span className="brand-name">ana</span>
+          <span className="cursor-blink">_</span>
         </div>
 
-        <div className="sidebar-section">
-          <h3>Data Ingestion</h3>
-          <FileUpload onUploadSuccess={(fileInfo) => setCurrentFile(fileInfo)} />
-        </div>
-
-        {currentFile && (
-          <div className="file-info glass-panel">
-            <p className="label">Active File</p>
-            <p className="filename">{currentFile.filename}</p>
-            <div className="file-stats">
-              <span>{currentFile.row_count} rows</span>
-              <span>{currentFile.sheet_name}</span>
+        <nav className="sidebar-nav">
+          <div className="nav-section">
+            <span className="section-title">ENGINE</span>
+            <div className="upload-wrapper">
+              <FileUpload onUploadSuccess={(fileInfo) => setCurrentFile(fileInfo)} />
             </div>
           </div>
-        )}
 
-        <div className="sidebar-footer">
-          <p>© 2026 AI Analyst Pro</p>
-        </div>
+          {currentFile && (
+            <div className="active-session">
+              <span className="section-title">SESSION</span>
+              <div className="file-info mono">
+                <p className="filename">{currentFile.filename}</p>
+                <div className="stats">
+                  {currentFile.row_count} rows | {currentFile.sheet_name}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="sidebar-animation">
+            <Tree5 />
+          </div>
+        </nav>
+
+        <footer className="sidebar-footer mono">
+          <p>v0.4.2-stable</p>
+        </footer>
       </aside>
 
-      <main className="main-content">
-        <header className="main-header glass-panel">
-          <div className="status-indicator">
-            <span className={`dot ${currentFile ? 'active' : ''}`}></span>
-            {currentFile ? 'System Ready' : 'Awaiting Data'}
+      <main className="main-stage">
+        <header className="page-header">
+          <div className="status-bar mono">
+            <span className={`status-dot ${currentFile ? 'online' : 'idle'}`}></span>
+            {currentFile ? 'CONNECTED' : 'STANDBY'}
           </div>
-          <h1>Business Intelligence Dashboard</h1>
+          <h1 className="mono">Intelligence Analyst</h1>
         </header>
 
-        <section className="chat-container">
+        <section className="interaction-zone">
           <ChatInterface activeFile={currentFile} />
         </section>
       </main>
 
       <style jsx>{`
-        .dashboard-container {
+        .app-container {
           display: flex;
           height: 100vh;
           width: 100vw;
-          padding: 16px;
-          gap: 16px;
-          overflow: hidden;
+          background: var(--bg-color);
+          color: var(--text-primary);
         }
 
         .sidebar {
-          width: 320px;
+          width: 280px;
+          border-right: 1px solid var(--border-color);
           display: flex;
           flex-direction: column;
           padding: 24px;
-          flex-shrink: 0;
+          background: #080808;
         }
 
-        .brand {
+        .branding {
+          font-family: var(--font-mono);
+          font-size: 24px;
+          font-weight: 700;
+          margin-bottom: 40px;
+          color: var(--accent-color);
           display: flex;
           align-items: center;
-          gap: 12px;
-          margin-bottom: 40px;
         }
 
-        .brand-logo {
-          font-size: 32px;
+        .cursor-blink {
+          animation: blink 1s step-end infinite;
         }
 
-        .sidebar-section {
-          flex-grow: 1;
+        @keyframes blink {
+          50% { opacity: 0; }
         }
 
-        .sidebar-section h3 {
-          font-size: 12px;
-          text-transform: uppercase;
+        .sidebar-nav {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          gap: 32px;
+        }
+
+        .section-title {
+          display: block;
+          font-family: var(--font-mono);
+          font-size: 11px;
           color: var(--text-secondary);
-          margin-bottom: 16px;
+          margin-bottom: 12px;
           letter-spacing: 0.1em;
         }
 
         .file-info {
-          margin-top: 24px;
-          padding: 16px;
-          background: rgba(255, 255, 255, 0.05);
+          padding: 12px;
+          background: var(--surface-color);
+          border-radius: 4px;
+          border: 1px solid var(--border-color);
         }
 
-        .file-info .label {
-          font-size: 10px;
-          text-transform: uppercase;
-          color: var(--accent-color);
+        .filename {
+          font-size: 13px;
+          color: var(--text-primary);
           margin-bottom: 4px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
-        .file-info .filename {
-          font-weight: 600;
-          font-size: 14px;
-          margin-bottom: 8px;
-        }
-
-        .file-stats {
-          display: flex;
-          justify-content: space-between;
-          font-size: 12px;
+        .stats {
+          font-size: 11px;
           color: var(--text-secondary);
         }
 
-        .main-content {
-          flex-grow: 1;
+        .sidebar-animation {
+          margin-top: auto;
+          width: 100%;
+          height: 140px;
           display: flex;
-          flex-direction: column;
-          gap: 16px;
+          align-items: flex-end;
           overflow: hidden;
-        }
-
-        .main-header {
-          padding: 20px 32px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .status-indicator {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-size: 14px;
-          color: var(--text-secondary);
-        }
-
-        .dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 50%;
-          background: #334155;
-        }
-
-        .dot.active {
-          background: var(--accent-color);
-          box-shadow: 0 0 8px var(--accent-color);
-        }
-
-        .chat-container {
-          flex-grow: 1;
-          overflow: hidden;
+          opacity: 0.8;
+          /* Filter to make it look slightly more integrated */
+          filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.1));
         }
 
         .sidebar-footer {
-          margin-top: auto;
-          font-size: 12px;
+          font-size: 10px;
+          color: #333;
+          padding-top: 20px;
+          border-top: 1px solid #1a1a1a;
+          margin-top: 24px;
+        }
+
+        .main-stage {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: var(--bg-color);
+        }
+
+        .page-header {
+          padding: 20px 40px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          border-bottom: 1px solid var(--border-color);
+        }
+
+        .page-header h1 {
+          font-size: 14px;
+          font-weight: 500;
           color: var(--text-secondary);
-          text-align: center;
+        }
+
+        .status-bar {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 11px;
+          font-weight: 600;
+        }
+
+        .status-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+        }
+
+        .status-dot.online { background: var(--terminal-green); box-shadow: 0 0 8px var(--terminal-green); }
+        .status-dot.idle { background: #333; }
+
+        .interaction-zone {
+          flex: 1;
+          padding: 0;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
         }
       `}</style>
     </div>

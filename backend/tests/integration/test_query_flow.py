@@ -12,8 +12,15 @@ class TestQueryFlow:
 
     def test_full_flow_success(self, tmp_path):
         """Test uploading a file and then querying it."""
-        # Override storage for test
-        os.environ["QDRANT_PATH"] = str(tmp_path / "qdrant")
+        from modules.rag.vector_store import VectorStore
+        from config import settings
+        
+        # Override storage for test (update both env and settings object)
+        test_db_path = tmp_path / "qdrant"
+        os.environ["QDRANT_PATH"] = str(test_db_path)
+        settings.QDRANT_PATH = test_db_path
+        
+        VectorStore.clear_client()
         
         # 1. Setup Mocks
         mock_openai_client = MagicMock()
@@ -36,8 +43,9 @@ class TestQueryFlow:
         mock_openai_client.chat.completions.create.return_value = mock_llm_response
         
         # 2. Inject Dependency Override
-        from main import get_openai_client
-        app.dependency_overrides[get_openai_client] = lambda: mock_openai_client
+        from main import get_embedding_client, get_llm_client
+        app.dependency_overrides[get_embedding_client] = lambda: mock_openai_client
+        app.dependency_overrides[get_llm_client] = lambda: mock_openai_client
         
         try:
             client = TestClient(app)
@@ -49,6 +57,7 @@ class TestQueryFlow:
             # 4. Perform Upload
             upload_resp = client.post("/upload", files=files)
             assert upload_resp.status_code == 200
+            assert "job_id" in upload_resp.json()
 
             # 5. Perform Query
             query_resp = client.post("/query", json={"question": "How is the profit?"})

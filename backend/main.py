@@ -1,24 +1,36 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-from typing import List, Any
+from typing import List, Any, Dict
 import logging
 from config import settings
-from models.request_models import QueryRequest, FileUploadResponse
-from models.response_models import AnalysisResponse, FileInfo
+from models.request_models import QueryRequest
+from models.response_models import AnalysisResponse, FileInfo, JobStatusResponse
 from modules.ingestion.excel_parser import ExcelParser
+from modules.ingestion.async_processor import process_file_async
 from modules.storage.file_manager import FileManager
-from modules.rag.chunker import Chunker
-from modules.rag.embedder import Embedder
 from modules.rag.vector_store import VectorStore
 from modules.llm.analyst_agent import AnalystAgent
+from utils.job_tracker import JobTracker
+
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting up backend...")
+    yield
+    # Shutdown
+    logger.info("Shutting down backend...")
+    VectorStore.clear_client()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="Backend API for AI Business Analyst Assistant"
+    description="Backend API for AI Business Analyst Assistant",
+    lifespan=lifespan
 )
 
 # CORS Configuration
@@ -52,49 +64,47 @@ def get_analyst_agent(client: Any = Depends(get_llm_client)):
 async def root():
     return {"message": f"Welcome to {settings.PROJECT_NAME}", "version": settings.VERSION}
 
-@app.post("/upload", response_model=FileUploadResponse)
+@app.post("/upload", response_model=Dict[str, str])
 async def upload_file(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     client: Any = Depends(get_embedding_client)
 ):
-    """Upload a file, parse it, and index it for RAG."""
-    parser = ExcelParser()
+    """Upload a file and start asynchronous indexing."""
     file_manager = FileManager()
-    chunker = Chunker()
-    vector_store = VectorStore()
+    tracker = JobTracker()
     
     # 1. Save file
     content = await file.read()
     try:
         file_path = file_manager.save_file(content, file.filename)
         
-        # 2. Parse file
-        parsing_result = parser.parse_file(str(file_path))
+        # 2. Create Job ID
+        job_id = tracker.create_job()
         
-        # 3. Create chunks
-        chunks = chunker.create_row_chunks(parsing_result)
-        summary_chunk = chunker.create_summary_chunk(parsing_result)
-        all_chunks = chunks + [summary_chunk]
-        
-        # 4. Generate embeddings and store
-        embedder = Embedder(client=client)
-        
-        texts = [c["content"] for c in all_chunks]
-        embeddings = embedder.get_embeddings(texts)
-        ids = [f"{file.filename}_{i}" for i in range(len(all_chunks))]
-        
-        vector_store.add_documents(all_chunks, embeddings, ids)
-        
-        return FileUploadResponse(
-            filename=file.filename,
-            row_count=parsing_result["row_count"],
-            sheet_name=parsing_result["sheet_name"],
-            columns=parsing_result["columns"],
-            message="File uploaded and indexed successfully"
+        # 3. Start background processing
+        background_tasks.add_task(
+            process_file_async, 
+            job_id, 
+            str(file_path), 
+            file.filename, 
+            client
         )
+        
+        return {"job_id": job_id, "message": "File upload accepted and processing started"}
+        
     except Exception as e:
-        logger.error(f"Upload failed: {e}")
+        logger.error(f"Upload initialization failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/upload/status/{job_id}", response_model=JobStatusResponse)
+async def get_upload_status(job_id: str):
+    """Get the status of a background indexing job."""
+    tracker = JobTracker()
+    status = tracker.get_job(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return status
 
 @app.post("/query", response_model=AnalysisResponse)
 async def query_analyst(request: QueryRequest, agent: AnalystAgent = Depends(get_analyst_agent)):
@@ -109,7 +119,29 @@ async def query_analyst(request: QueryRequest, agent: AnalystAgent = Depends(get
             parsing_result = parser.parse_file(latest_file["path"])
             data_context = parsing_result["data"]
 
-        return agent.analyze(request.question, data_context=data_context)
+        return agent.analyze(
+            request.question, 
+            data_context=data_context, 
+            session_id=request.session_id or "default"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/chat/history")
+async def get_chat_history(session_id: str = "default", agent: AnalystAgent = Depends(get_analyst_agent)):
+    """Retrieve chat history for a specific session."""
+    try:
+        history = agent.memory.get_history(session_id)
+        return history
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/chat/history")
+async def clear_chat_history(session_id: str = "default", agent: AnalystAgent = Depends(get_analyst_agent)):
+    """Clear chat history for a specific session."""
+    try:
+        agent.clear_history(session_id)
+        return {"message": f"Chat history for session '{session_id}' cleared"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

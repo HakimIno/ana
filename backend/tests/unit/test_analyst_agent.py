@@ -60,4 +60,4 @@ class TestAnalystAgent:
         
         result = agent.analyze("test")
         assert result.status == "error"
-        assert "error during analysis" in result.answer.lower()
+        assert "analysis failed" in result.answer.lower()

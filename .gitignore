@@ -13,18 +13,45 @@ dist/
 downloads/
 *.egg-info/
 MANIFEST
+.pytest_cache/
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.uv/
+
+# Node.js
+node_modules/
+.next/
+out/
+.vercel
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.eslintcache
 
 # Project Specific
 backend/uploads/
 backend/qdrant_db/
 backend/vector_store/
-backend/.pytest_cache/
-backend/backend.db
+backend/models/fastembed_cache/
+backend/chat_memory.db
+*.db
+nohup.out
 *.log
+complex_financial_data.csv
+sample_business_data.csv
 
 # OS & IDE
 .DS_Store
+Thumbs.db
 .vscode/
 .idea/
 *.swp
 *.swo
+

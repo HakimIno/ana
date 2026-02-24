@@ -4,82 +4,135 @@ import { useState, useRef } from "react";
 import { UploadCloud, FileSpreadsheet, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 
 interface FileUploadProps {
-    onUploadSuccess: (fileInfo: any) => void;
+  onUploadSuccess: (fileInfo: any) => void;
 }
 
 export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
-    const [isUploading, setIsUploading] = useState(false);
-    const [uploadProgress, setUploadProgress] = useState(0);
-    const [error, setError] = useState<string | null>(null);
-    const [success, setSuccess] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+  const pollUploadStatus = async (jobId: string) => {
+    const pollInterval = 1000;
+    const maxAttempts = 60; // 1 minute timeout
+    let attempts = 0;
 
-        setIsUploading(true);
-        setError(null);
-        setSuccess(false);
+    const checkStatus = async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/upload/status/${jobId}`);
+        if (!response.ok) throw new Error("Status check failed");
 
-        const formData = new FormData();
-        formData.append("file", file);
+        const data = await response.json();
+        setUploadProgress(data.progress || 0);
 
-        try {
-            const response = await fetch("http://localhost:8000/upload", {
-                method: "POST",
-                body: formData,
-            });
-
-            if (!response.ok) {
-                throw new Error("Upload failed. Verify the file is a valid Excel or CSV.");
-            }
-
-            const data = await response.json();
-            setSuccess(true);
-            onUploadSuccess(data);
-        } catch (err: any) {
-            setError(err.message);
-        } finally {
-            setIsUploading(false);
+        if (data.status === "completed") {
+          setSuccess(true);
+          setIsUploading(false);
+          onUploadSuccess(data.result);
+          return;
+        } else if (data.status === "failed") {
+          setError(data.error || "Processing failed");
+          setIsUploading(false);
+          return;
         }
+
+        attempts++;
+        if (attempts < maxAttempts) {
+          setTimeout(checkStatus, pollInterval);
+        } else {
+          setError("Upload timed out during processing.");
+          setIsUploading(false);
+        }
+      } catch (err: any) {
+        setError(err.message);
+        setIsUploading(false);
+      }
     };
 
-    return (
-        <div className="upload-box">
-            <div
-                className={`drop-zone ${isUploading ? 'uploading' : ''} ${success ? 'success' : ''}`}
-                onClick={() => !isUploading && fileInputRef.current?.click()}
-            >
-                <div className="icon-container">
-                    {isUploading ? (
-                        <Loader2 className="icon spin" />
-                    ) : success ? (
-                        <CheckCircle2 className="icon success-icon" />
-                    ) : (
-                        <UploadCloud className="icon" />
-                    )}
-                </div>
-                <p>{isUploading ? 'Ingesting data...' : success ? 'Data Loaded' : 'Upload Data File'}</p>
-                <p className="subtext">{success ? 'Click to change file' : 'Drag & drop Excel or CSV'}</p>
-            </div>
+    checkStatus();
+  };
 
-            <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                style={{ display: 'none' }}
-                accept=".csv, .xlsx, .xls"
-            />
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-            {error && (
-                <div className="error-container">
-                    <AlertCircle size={14} />
-                    <span>{error}</span>
-                </div>
-            )}
+    setIsUploading(true);
+    setError(null);
+    setSuccess(false);
+    setUploadProgress(0);
 
-            <style jsx>{`
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Initial upload failed. Verify the file format.");
+      }
+
+      const data = await response.json();
+      if (data.job_id) {
+        pollUploadStatus(data.job_id);
+      } else {
+        // Compatibility with old sync endpoint if still present
+        setSuccess(true);
+        setIsUploading(false);
+        onUploadSuccess(data);
+      }
+    } catch (err: any) {
+      setError(err.message);
+      setIsUploading(false);
+    }
+  };
+
+  return (
+    <div className="upload-box">
+      <div
+        className={`drop-zone ${isUploading ? 'uploading' : ''} ${success ? 'success' : ''}`}
+        onClick={() => !isUploading && fileInputRef.current?.click()}
+      >
+        <div className="icon-container">
+          {isUploading ? (
+            <Loader2 className="icon spin" />
+          ) : success ? (
+            <CheckCircle2 className="icon success-icon" />
+          ) : (
+            <UploadCloud className="icon" />
+          )}
+        </div>
+        <p>{isUploading ? 'Ingesting data...' : success ? 'Data Loaded' : 'Upload Data File'}</p>
+        <p className="subtext">{success ? 'Click to change file' : 'Drag & drop Excel or CSV'}</p>
+
+        {isUploading && (
+          <div className="progress-container">
+            <div className="progress-bar" style={{ width: `${uploadProgress}%` }}></div>
+            <span className="progress-text">{uploadProgress}%</span>
+          </div>
+        )}
+      </div>
+
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
+        accept=".csv, .xlsx, .xls"
+      />
+
+      {error && (
+        <div className="error-container">
+          <AlertCircle size={14} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <style jsx>{`
         .upload-box {
           width: 100%;
         }
@@ -155,7 +208,32 @@ export default function FileUpload({ onUploadSuccess }: FileUploadProps) {
           gap: 6px;
           border: 1px solid rgba(239, 68, 68, 0.1);
         }
+
+        .progress-container {
+          margin-top: 16px;
+          width: 100%;
+          background: rgba(255, 255, 255, 0.05);
+          height: 6px;
+          border-radius: 3px;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .progress-bar {
+          height: 100%;
+          background: linear-gradient(90deg, var(--accent-color), var(--accent-secondary));
+          transition: width 0.3s ease;
+          border-radius: 3px;
+        }
+
+        .progress-text {
+          position: absolute;
+          top: -18px;
+          right: 0;
+          font-size: 10px;
+          color: var(--text-secondary);
+        }
       `}</style>
-        </div>
-    );
+    </div>
+  );
 }

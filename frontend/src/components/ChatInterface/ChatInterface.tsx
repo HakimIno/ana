@@ -2,364 +2,467 @@
 
 import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { Send, Bot, User, Zap, ShieldAlert, BarChart3, Info } from "lucide-react";
+import { Terminal, Send, Trash2, Loader2, BarChart3, Zap, ShieldAlert } from "lucide-react";
+import MetricsChart from "./MetricsChart";
+import BrainFlow from "../Brainflow";
 
 interface Message {
-    role: "user" | "ai";
-    content: string;
-    data?: any;
+  role: "user" | "ai";
+  content: string;
+  data?: any;
 }
 
 interface ChatInterfaceProps {
-    activeFile: any;
+  activeFile: any;
 }
 
 export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
-    const [messages, setMessages] = useState<Message[]>([
-        {
-            role: "ai",
-            content: "Hello! I'm your AI Business Analyst. Once you upload a file, I can analyze trends, calculate growth, and provide strategic recommendations based on verified data."
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: "ai",
+      content: "System initialized. Listening for data streams or analytical queries."
+    }
+  ]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isLoading]);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const response = await fetch("http://localhost:8000/chat/history?session_id=default");
+        if (response.ok) {
+          const history = await response.json();
+          if (history && history.length > 0) {
+            setMessages(history);
+          }
         }
-    ]);
-    const [input, setInput] = useState("");
-    const [isLoading, setIsLoading] = useState(false);
-    const scrollRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-    }, [messages, isLoading]);
-
-    const handleSend = async () => {
-        if (!input.trim() || isLoading) return;
-
-        const userMsg = input;
-        setInput("");
-        setMessages(prev => [...prev, { role: "user", content: userMsg }]);
-        setIsLoading(true);
-
-        try {
-            const response = await fetch("http://localhost:8000/query", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: userMsg }),
-            });
-
-            if (!response.ok) throw new Error("Analysis engine unavailable");
-
-            const data = await response.json();
-            setMessages(prev => [...prev, { role: "ai", content: data.answer, data: data }]);
-        } catch (err: any) {
-            setMessages(prev => [...prev, { role: "ai", content: "⚠️ **System Error:** " + err.message }]);
-        } finally {
-            setIsLoading(false);
-        }
+      } catch (err) {
+        console.error("Failed to fetch chat history:", err);
+      }
     };
+    fetchHistory();
+  }, []);
 
-    return (
-        <div className="chat-interface glass-panel">
-            <div className="messages-list" ref={scrollRef}>
-                {messages.map((msg, i) => (
-                    <div key={i} className={`message-wrapper ${msg.role}`}>
-                        <div className={`avatar ${msg.role}`}>
-                            {msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}
-                        </div>
-                        <div className={`message ${msg.role === 'user' ? 'message-user' : 'message-ai'}`}>
-                            <div className="content">
-                                <ReactMarkdown>{msg.content}</ReactMarkdown>
-                            </div>
+  const handleSend = async () => {
+    if (!input.trim() || isLoading) return;
 
-                            {msg.data && msg.data.key_metrics && Object.keys(msg.data.key_metrics).length > 0 && (
-                                <div className="analysis-summary">
-                                    <div className="section-header">
-                                        <BarChart3 size={14} className="icon-emerald" />
-                                        <span>Key Metrics</span>
-                                    </div>
-                                    <div className="metrics-grid">
-                                        {Object.entries(msg.data.key_metrics).map(([key, val]: any) => (
-                                            <div key={key} className="metric-card">
-                                                <span className="key">{key}</span>
-                                                <span className="val">{typeof val === 'object' ? val.mean?.toLocaleString() : val}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
+    const userMsg = input;
+    setInput("");
+    setMessages(prev => [...prev, { role: "user", content: userMsg }]);
+    setIsLoading(true);
 
-                            {msg.data && msg.data.recommendations?.length > 0 && (
-                                <div className="ai-section recommendations">
-                                    <div className="section-header">
-                                        <Zap size={14} className="icon-blue" />
-                                        <span>Strategic Advice</span>
-                                    </div>
-                                    <ul>
-                                        {msg.data.recommendations.map((rec: string, idx: number) => (
-                                            <li key={idx}>{rec}</li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
+    try {
+      const response = await fetch("http://localhost:8000/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: userMsg }),
+      });
 
-                            {msg.data && msg.data.risks?.length > 0 && (
-                                <div className="ai-section risks">
-                                    <div className="section-header">
-                                        <ShieldAlert size={14} className="icon-rose" />
-                                        <span>Detected Risks</span>
-                                    </div>
-                                    <ul>
-                                        {msg.data.risks.map((risk: string, idx: number) => (
-                                            <li key={idx}>{risk}</li>
-                                        ))}
-                                    </ul>
-                                </div>
-                            )}
+      if (!response.ok) throw new Error("Connection failed");
 
-                            {msg.data && msg.data.confidence_score && (
-                                <div className="confidence-score">
-                                    <Info size={10} />
-                                    Confidence: {Math.round(msg.data.confidence_score * 100)}%
-                                </div>
-                            )}
-                        </div>
+      const data = await response.json();
+      setMessages(prev => [...prev, { role: "ai", content: data.answer, data: data }]);
+    } catch (err: any) {
+      setMessages(prev => [...prev, { role: "ai", content: "Error: " + err.message }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (isLoading) return;
+    try {
+      await fetch("http://localhost:8000/chat/history?session_id=default", { method: "DELETE" });
+      setMessages([{ role: "ai", content: "History cleared. Waiting for input." }]);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  return (
+    <div className="terminal-chat">
+      <div className="output-stream" ref={scrollRef}>
+        {messages.map((msg, i) => (
+          <div key={i} className={`terminal-line ${msg.role}`}>
+            <span className="prompt-indicator">
+              {msg.role === 'user' ? '>' : '┃'}
+            </span>
+            <div className="terminal-content">
+
+
+              <div className="text-payload">
+                <ReactMarkdown>{msg.content}</ReactMarkdown>
+              </div>
+
+              {msg.data && (
+                <div className="data-attachments">
+                  {(msg.data.charts || []).map((chart: any, idx: number) => (
+                    <div key={idx} className="chart-wrapper">
+                      <MetricsChart
+                        data={chart.data}
+                        title={chart.title}
+                        type={chart.type}
+                      />
                     </div>
-                ))}
-                {isLoading && (
-                    <div className="message-wrapper ai">
-                        <div className="avatar ai"><Bot size={16} /></div>
-                        <div className="message message-ai loading">
-                            <span className="pulse">Analysing data streams...</span>
-                        </div>
-                    </div>
-                )}
-            </div>
+                  ))}
 
-            <div className="input-area">
-                <div className="input-container">
-                    <input
-                        type="text"
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        placeholder={activeFile ? "Ask a question about your business data..." : "Upload a file to begin analysis"}
-                        disabled={!activeFile || isLoading}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                    />
-                    <button
-                        className="send-button"
-                        onClick={handleSend}
-                        disabled={!activeFile || isLoading || !input.trim()}
-                    >
-                        <Send size={18} />
-                    </button>
+                  {msg.data.chart_data && msg.data.chart_data.length > 0 && !(msg.data.charts?.length) && (
+                    <div className="chart-wrapper">
+                      <MetricsChart data={msg.data.chart_data} title={msg.data.title} />
+                    </div>
+                  )}
+
+                  {msg.data.key_metrics && Object.keys(msg.data.key_metrics).length > 0 && (
+                    <div className="metrics-summary">
+                      <p className="summary-title"><BarChart3 size={12} /> KEY_METRICS</p>
+                      <div className="metrics-grid">
+                        {Object.entries(msg.data.key_metrics).map(([key, val]: any) => (
+                          <div key={key} className="metric-item">
+                            <span className="key">{key}:</span>
+                            <span className="val">{typeof val === 'object' ? val.mean?.toFixed(2) : val}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {msg.data.recommendations?.length > 0 && (
+                    <div className="insight-block recommendations">
+                      <p className="summary-title"><Zap size={12} /> STRATEGIC_ACTION</p>
+                      <ul>
+                        {msg.data.recommendations.map((rec: string, idx: number) => (
+                          <li key={idx}>- {rec}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {msg.data.risks?.length > 0 && (
+                    <div className="insight-block risks">
+                      <p className="summary-title"><ShieldAlert size={12} /> RISK_DETECTED</p>
+                      <ul>
+                        {msg.data.risks.map((risk: string, idx: number) => (
+                          <li key={idx}>- {risk}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
+              )}
             </div>
+          </div>
+        ))}
+        {isLoading && (
+          <div className="terminal-line ai loading">
+            <span className="prompt-indicator">┃</span>
+            <div className="terminal-content" style={{ display: 'flex', alignItems: 'center', height: '100px', overflow: 'hidden' }}>
+              <BrainFlow size={100} />
+            </div>
+          </div>
+        )}
 
-            <style jsx>{`
-        .chat-interface {
+
+        {/* <div className="tree-animation">
+          <TreeDraw />
+        </div> */}
+      </div>
+
+      <div className="prompt-area">
+        <div className="input-strip">
+          <span className="input-prompt">{activeFile ? 'ana ~' : 'system ~'}</span>
+          <input
+            type="text"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={activeFile ? "Enter command or query..." : "Please upload a data source..."}
+            disabled={!activeFile || isLoading}
+            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+            autoFocus
+          />
+          <div className="actions">
+            <button className="icon-btn" onClick={handleClear} title="Clear Terminal">
+              <Trash2 size={16} />
+            </button>
+            <button className="icon-btn primary" onClick={handleSend} disabled={!input.trim() || isLoading}>
+              {isLoading ? <Loader2 size={16} className="spin" /> : <Terminal size={16} />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .terminal-chat {
           height: 100%;
           display: flex;
           flex-direction: column;
-          overflow: hidden;
-          background: rgba(255, 255, 255, 0.01);
+          background: var(--bg-color);
+          font-family: var(--font-mono);
+          position: relative;
         }
 
-        .messages-list {
-          flex-grow: 1;
+        .output-stream {
+          flex: 1;
           overflow-y: auto;
-          padding: 32px;
+          padding: 40px;
           display: flex;
           flex-direction: column;
-          gap: 24px;
+          gap: 16px;
         }
 
-        .message-wrapper {
+        .terminal-line {
           display: flex;
           gap: 16px;
-          width: 100%;
         }
 
-        .message-wrapper.user { flex-direction: row-reverse; }
-
-        .avatar {
-          width: 32px;
-          height: 32px;
-          border-radius: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
+        .prompt-indicator {
+          font-weight: bold;
           flex-shrink: 0;
-          margin-top: 4px;
+          padding-top: 2px;
         }
 
-        .avatar.ai { background: rgba(16, 185, 129, 0.1); color: var(--accent-color); border: 1px solid rgba(16, 185, 129, 0.2); }
-        .avatar.user { background: rgba(59, 130, 246, 0.1); color: var(--accent-secondary); border: 1px solid rgba(59, 130, 246, 0.2); }
+        .user .prompt-indicator { color: var(--accent-color); }
+        .ai .prompt-indicator { color: var(--text-secondary); opacity: 0.5; }
 
-        .message {
-          max-width: 80%;
-          line-height: 1.6;
+        .terminal-content {
+          flex: 1;
           font-size: 14px;
-        }
-
-        .message.message-ai {
-          padding: 8px 0;
+          line-height: 1.6;
           color: var(--text-primary);
         }
 
-        .message.message-user {
-          background: rgba(59, 130, 246, 0.1);
-          padding: 12px 16px;
-          border-radius: 12px 12px 0 12px;
-          border: 1px solid rgba(59, 130, 246, 0.1);
+        .user .text-payload {
+          color: var(--text-primary);
+          font-weight: 500;
         }
 
-        .analysis-summary {
+        .data-attachments {
           margin-top: 20px;
-          background: rgba(255, 255, 255, 0.03);
-          border-radius: 12px;
-          padding: 16px;
-          border: 1px solid var(--border-color);
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
         }
 
-        .section-header {
-          display: flex;
-          align-items: center;
-          gap: 8px;
+        .chart-wrapper {
+          background: #000;
+          border: 1px solid var(--border-color);
+          padding: 10px;
+          border-radius: 4px;
+        }
+
+        .summary-title {
           font-size: 11px;
           font-weight: 700;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          margin-bottom: 12px;
           color: var(--text-secondary);
+          margin-bottom: 12px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
-
-        .icon-emerald { color: var(--accent-color); }
-        .icon-blue { color: var(--accent-secondary); }
-        .icon-rose { color: var(--error); }
 
         .metrics-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
           gap: 12px;
+          margin-top: 10px;
         }
 
-        .metric-card {
-          background: rgba(255, 255, 255, 0.02);
-          padding: 10px;
-          border-radius: 8px;
-          border: 1px solid var(--border-color);
+        .metric-item {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          background: #0a0a0a;
+          border: 1px solid #1a1a1a;
+          padding: 12px 16px;
+          border-radius: 4px;
+          transition: all 0.2s ease;
         }
 
-        .metric-card .key {
-          display: block;
+        .metric-item:hover {
+          border-color: var(--accent-color);
+          background: #111;
+          transform: translateY(-2px);
+        }
+    
+        .metric-item .key { 
+          color: var(--text-secondary); 
           font-size: 10px;
-          color: var(--text-secondary);
-          margin-bottom: 4px;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+        }
+        .metric-item .val { 
+          color: var(--accent-color); 
+          font-weight: 600; 
+          font-size: 16px;
+          font-family: var(--font-mono);
         }
 
-        .metric-card .val {
-          font-size: 14px;
-          font-weight: 600;
-          color: var(--text-primary);
-        }
-
-        .ai-section {
-          margin-top: 20px;
-        }
-
-        .ai-section ul {
+        .insight-block ul {
           list-style: none;
           padding: 0;
           display: flex;
           flex-direction: column;
+          gap: 6px;
+        }
+
+        .insight-block li {
+          font-size: 13px;
+          color: var(--text-primary);
+        }
+
+        .recommendations .summary-title { color: var(--accent-color); }
+        .risks .summary-title { color: var(--error); }
+
+        .ai-thought-process {
+          background: rgba(var(--accent-rgb), 0.05);
+          border-left: 2px solid var(--accent-color);
+          padding: 8px 12px;
+          margin-bottom: 12px;
+          font-size: 11px;
+          color: var(--text-secondary);
+          animation: revealAndFade 6s forwards;
+          border-radius: 0 4px 4px 0;
+          overflow: hidden;
+        }
+
+        .thought-header {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-weight: bold;
+          font-size: 9px;
+          letter-spacing: 0.1em;
+          margin-bottom: 4px;
+          color: var(--accent-color);
+        }
+
+        .pulse-icon {
+          animation: pulse 1.5s infinite;
+        }
+
+        @keyframes revealAndFade {
+          0% { opacity: 0; max-height: 0; transform: translateY(-10px); }
+          10% { opacity: 0.8; max-height: 200px; transform: translateY(0); }
+          80% { opacity: 0.8; max-height: 200px; }
+          100% { opacity: 0; max-height: 0; margin-bottom: 0; padding: 0; }
+        }
+
+        .thinking {
+          color: var(--accent-color);
+          font-size: 13px;
+          display: flex;
+          align-items: center;
           gap: 8px;
         }
-
-        .ai-section li {
-          font-size: 13px;
-          background: rgba(255, 255, 255, 0.02);
-          padding: 10px 12px;
-          border-radius: 8px;
-          border-left: 3px solid transparent;
+        
+        .thinking::after {
+          content: '...';
+          animation: dots 1.5s steps(5, end) infinite;
+          width: 20px;
         }
 
-        .recommendations li { border-left-color: var(--accent-secondary); }
-        .risks li { border-left-color: var(--error); background: rgba(239, 68, 68, 0.02); }
+        @keyframes dots {
+          0%, 20% { content: '.'; }
+          40% { content: '..'; }
+          60% { content: '...'; }
+        }
 
-        .confidence-score {
-          margin-top: 16px;
-          font-size: 10px;
-          color: var(--text-secondary);
+        @keyframes pulse {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 1; }
+        }
+
+        .prompt-area {
+          padding: 20px 40px 40px;
+          background: linear-gradient(transparent, var(--bg-color) 40%);
+        }
+
+        .input-strip {
           display: flex;
           align-items: center;
-          gap: 4px;
-        }
-
-        .input-area {
-          padding: 24px 32px 32px;
-          background: linear-gradient(to top, var(--bg-color), transparent);
-        }
-
-        .input-container {
-          position: relative;
-          display: flex;
-          align-items: center;
-          background: rgba(255, 255, 255, 0.03);
+          gap: 12px;
+          background: var(--surface-color);
           border: 1px solid var(--border-color);
-          border-radius: 12px;
-          padding: 4px;
-          transition: border-color 0.2s;
+          padding: 8px 16px;
+          border-radius: 4px;
         }
 
-        .input-container:focus-within {
-          border-color: var(--accent-secondary);
+        .input-prompt {
+          color: var(--accent-color);
+          font-weight: 600;
+          font-size: 13px;
+          white-space: nowrap;
         }
 
         input {
-          flex-grow: 1;
-          background: transparent;
-          border: none;
-          padding: 12px 16px;
-          color: white;
+          flex: 1;
+          background: transparent !important;
+          border: none !important;
+          padding: 8px 0 !important;
           font-size: 14px;
+          color: white;
           outline: none;
         }
 
-        .send-button {
-          background: var(--accent-secondary);
-          color: white;
+        .actions {
+          display: flex;
+          gap: 8px;
+        }
+
+        .icon-btn {
+          background: transparent;
           border: none;
-          width: 40px;
-          height: 40px;
-          border-radius: 8px;
+          color: var(--text-secondary);
+          width: 32px;
+          height: 32px;
           display: flex;
           align-items: center;
           justify-content: center;
           cursor: pointer;
-          transition: transform 0.2s;
+          border-radius: 4px;
+          transition: all 0.2s;
         }
 
-        .send-button:hover:not(:disabled) {
-          transform: scale(1.05);
+        .icon-btn:hover:not(:disabled) {
+          background: #1a1a1a;
+          color: white;
         }
 
-        .send-button:disabled {
-          opacity: 0.5;
+        .icon-btn.primary {
+          color: var(--accent-color);
+        }
+
+        .icon-btn.primary:hover:not(:disabled) {
+          background: var(--accent-color);
+          color: white;
+        }
+
+        .icon-btn:disabled {
+          opacity: 0.3;
           cursor: not-allowed;
-          background: var(--text-secondary);
         }
 
-        .pulse {
-          animation: pulse 2s infinite;
-          font-size: 12px;
-          color: var(--text-secondary);
-        }
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-        @keyframes pulse {
-          0% { opacity: 0.5; }
-          50% { opacity: 1; }
-          100% { opacity: 0.5; }
+        /* Custom Scrollbar */
+        .output-stream::-webkit-scrollbar { width: 4px; }
+        .output-stream::-webkit-scrollbar-track { background: transparent; }
+        .output-stream::-webkit-scrollbar-thumb { background: #222; border-radius: 10px; }
+        .output-stream::-webkit-scrollbar-thumb:hover { background: #333; }
+
+        .tree-animation {
+          display: flex;
+          justify-content: center;
+          align-items: center;
         }
       `}</style>
-        </div>
-    );
+    </div>
+  );
 }

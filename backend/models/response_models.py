@@ -1,13 +1,38 @@
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+from enum import Enum
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class JobStatusResponse(BaseModel):
+    """Status of a background job."""
+    job_id: str
+    status: JobStatus
+    progress: int # 0-100
+    message: str
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+class ChartConfig(BaseModel):
+    """Configuration for a single chart."""
+    type: str = "area" # area, bar, line, pie, radar
+    title: str
+    data: List[Dict[str, Any]]
 
 class AnalysisResponse(BaseModel):
     """Structured response for financial analysis."""
     answer: str
+    thought: Optional[str] = None
     key_metrics: Dict[str, Any]
     recommendations: List[str]
     risks: List[str]
     confidence_score: float
+    charts: Optional[List[ChartConfig]] = []
+    chart_data: Optional[List[Dict[str, Any]]] = None # Legacy
     source_documents: Optional[List[str]] = []
     status: str = "success"
 

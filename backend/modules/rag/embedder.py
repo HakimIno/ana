@@ -1,6 +1,7 @@
 from typing import List, Any
 from openai import OpenAI
 from zai import ZaiClient
+from fastembed import SparseTextEmbedding
 from config import settings
 import logging
 
@@ -22,9 +23,19 @@ class Embedder:
                 self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         
         self.model = settings.ZAI_EMBEDDING_MODEL if provider == "zai" else settings.OPENAI_EMBEDDING_MODEL
+        
+        # Initialize Sparse Encoder for Hybrid Search
+        logger.info("Initializing SparseTextEmbedding model (Splade_PP_en_v1)")
+        # Phase 3: Hardware optimization (using CPU threads efficiently)
+        import multiprocessing
+        cpus = multiprocessing.cpu_count()
+        self.sparse_model = SparseTextEmbedding(
+            model_name="prithivida/Splade_PP_en_v1",
+            threads=max(1, cpus // 2) # Use about half of available cores to prevent system locking
+        )
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for a list of texts."""
+        """Generate dense embeddings for a list of texts."""
         if not texts:
             return []
         
@@ -38,6 +49,12 @@ class Embedder:
         except Exception as e:
             logger.error(f"Error generating embeddings with {self.provider}: {e}")
             raise ValueError(f"{self.provider} Embedding failed: {e}")
+
+    def get_sparse_embeddings(self, texts: List[str]) -> List[Any]:
+        """Generate sparse embeddings using FastEmbed."""
+        if not texts:
+            return []
+        return list(self.sparse_model.embed(texts))
 
     def get_embedding(self, text: str) -> List[float]:
         """Generate embedding for a single text."""

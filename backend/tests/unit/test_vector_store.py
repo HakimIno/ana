@@ -9,8 +9,10 @@ class TestVectorStore:
     @pytest.fixture
     def store(self, tmp_path):
         db_path = tmp_path / "test_db"
+        VectorStore.clear_client()
         vs = VectorStore(db_path=db_path)
         yield vs
+        VectorStore.clear_client()
         if db_path.exists():
             shutil.rmtree(db_path)
 

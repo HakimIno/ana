@@ -28,8 +28,10 @@ class Settings(BaseSettings):
     STORAGE_DIR: Path = BASE_DIR / "uploads"
     QDRANT_PATH: Path = BASE_DIR / "qdrant_db"
     
-    # RAG Settings
     QDRANT_COLLECTION_NAME: str = "business_data"
+    
+    # FastEmbed Cache
+    FASTEMBED_CACHE_PATH: Path = BASE_DIR / "models" / "fastembed_cache"
     
     # Model configuration
     model_config = SettingsConfigDict(
@@ -43,3 +45,4 @@ settings = Settings()
 # Ensure directories exist
 settings.STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 settings.QDRANT_PATH.mkdir(parents=True, exist_ok=True)
+settings.FASTEMBED_CACHE_PATH.mkdir(parents=True, exist_ok=True)
