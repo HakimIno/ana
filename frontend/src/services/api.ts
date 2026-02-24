@@ -16,8 +16,17 @@ export const chatService = {
         return response.data;
     },
 
-    postQuery: async (question: string): Promise<QueryResponse> => {
-        const response = await api.post<QueryResponse>("/query", { question });
+    postQuery: async (question: string, filename?: string, sessionId: string = "default"): Promise<QueryResponse> => {
+        const response = await api.post<QueryResponse>("/query", {
+            question,
+            filename,
+            session_id: sessionId
+        });
+        return response.data;
+    },
+
+    listSessions: async (): Promise<any[]> => {
+        const response = await api.get<any[]>("/chat/sessions");
         return response.data;
     },
 

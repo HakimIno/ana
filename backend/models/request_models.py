@@ -5,6 +5,7 @@ class QueryRequest(BaseModel):
     """Request model for natural language queries."""
     question: str
     session_id: Optional[str] = "default"
+    filename: Optional[str] = None
     # Optional parameters for advanced filtering
     filters: Optional[Dict[str, Any]] = None
 

@@ -1,20 +1,23 @@
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap");
 
 :root {
-  --bg-color: #0c0c0c;
-  --surface-color: #141414;
-  --accent-color: #8b5cf6; /* Claude Purple */
-  --accent-secondary: #06b6d4; /* Cyan */
-  --text-primary: #e5e7eb;
+  --bg-color: #060606;
+  --surface-color: #111111;
+  --accent-color: #8b5cf6;
+  --accent-glow: rgba(139, 92, 246, 0.4);
+  --accent-secondary: #06b6d4;
+  --text-primary: #f3f4f6;
   --text-secondary: #9ca3af;
-  --border-color: #262626;
-  --glass-bg: rgba(20, 20, 20, 0.8);
-  --error: #ef4444;
-  --warning: #f59e0b;
+  --border-color: rgba(255, 255, 255, 0.08);
+  --glass-bg: rgba(13, 13, 13, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --error: #f43f5e;
+  --warning: #fbbf24;
   --font-mono: "JetBrains Mono", "Courier New", monospace;
-  --font-sans: "Inter", system-ui, sans-serif;
+  --font-sans: var(--font-inter), "Inter", system-ui, sans-serif;
   --terminal-green: #10b981;
   --terminal-blue: #3b82f6;
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 * {
@@ -30,6 +33,26 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
+  letter-spacing: -0.01em;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 code,
@@ -39,73 +62,79 @@ pre,
 }
 
 .glass-panel {
-  background: var(--surface-color);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transition: var(--transition-smooth);
 }
 
 .premium-button {
-  background: var(--accent-color);
+  background: linear-gradient(135deg, var(--accent-color), #7c3aed);
   color: white;
   border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
-  font-weight: 500;
-  font-family: var(--font-mono);
-  font-size: 13px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  font-size: 14px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: var(--transition-smooth);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .premium-button:hover {
-  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
   filter: brightness(1.1);
 }
 
-.message-user {
-  padding: 0;
-  margin: 8px 0;
-  align-self: flex-start;
-  width: 100%;
+.premium-button:active {
+  transform: translateY(0);
 }
 
 .message-ai {
-  padding: 0;
-  margin: 12px 0;
-  align-self: flex-start;
-  width: 100%;
   line-height: 1.6;
+  font-size: 15px;
 }
 
 h1,
 h2,
 h3 {
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 input,
 textarea {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border-color);
   color: white;
-  padding: 10px 14px;
-  border-radius: 6px;
+  padding: 12px 16px;
+  border-radius: 8px;
   outline: none;
-  font-family: var(--font-mono);
-  transition: border-color 0.2s;
+  font-family: var(--font-sans);
+  transition: var(--transition-smooth);
 }
 
 input:focus {
   border-color: var(--accent-color);
+  background: rgba(139, 92, 246, 0.05);
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.1);
 }
 
-/* Custom Claude-style elements */
+/* Custom Prompt Style */
 .prompt-prefix {
   color: var(--accent-color);
   font-family: var(--font-mono);
   margin-right: 12px;
-  font-weight: bold;
+  font-weight: 700;
+  text-shadow: 0 0 10px var(--accent-glow);
 }
 
 .terminal-line {
@@ -113,9 +142,27 @@ input:focus {
   align-items: flex-start;
   font-family: var(--font-mono);
   font-size: 14px;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  padding: 8px;
+  border-radius: 6px;
+  transition: background 0.2s;
 }
 
-.terminal-content {
-  flex: 1;
+.terminal-line:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.nav-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.section-title {
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  margin-bottom: 8px;
 }

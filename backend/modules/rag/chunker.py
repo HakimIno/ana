@@ -1,35 +1,38 @@
 from typing import List, Dict, Any
-import json
 
 class Chunker:
     """Utility to convert tabular data into descriptive text chunks for RAG."""
 
-    def create_row_chunks(self, parsing_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def create_row_chunks(self, parsing_result: Dict[str, Any], rows_per_chunk: int = 10) -> List[Dict[str, Any]]:
         """
-        Convert row-based data into descriptive text chunks.
-        
-        Each chunk contains the text representation of the row and associated metadata.
+        Convert row-based data into descriptive text chunks, grouping multiple rows 
+        into a single chunk for better performance and context.
         """
         data = parsing_result.get("data", [])
         sheet_name = parsing_result.get("sheet_name", "default")
         chunks = []
 
-        for i, row in enumerate(data):
-            # Create a descriptive string for the row
-            # Example: "In January, the revenue was 100,000, cost was 70,000..."
-            row_items = []
-            for col, val in row.items():
-                if val is not None:
-                    row_items.append(f"{col}: {val}")
+        for i in range(0, len(data), rows_per_chunk):
+            batch = data[i : i + rows_per_chunk]
             
-            content = f"Sheet: {sheet_name} | Data Point {i+1}: " + ", ".join(row_items)
+            # Combine multiple rows into one descriptive text
+            batch_lines = []
+            for j, row in enumerate(batch):
+                row_items = [f"{col}: {val}" for col, val in row.items() if val is not None]
+                row_text = f"[Row {i + j + 1}]: " + ", ".join(row_items)
+                batch_lines.append(row_text)
             
+            content = f"Sheet: {sheet_name} | Group {i//rows_per_chunk + 1} | \n" + "\n".join(batch_lines)
+            
+            # Collect metadata from all rows in the batch (deduplicated)
+            # For simplicity, we use the first row's key attributes if they represent categories
             chunks.append({
                 "content": content,
                 "metadata": {
                     "source": sheet_name,
-                    "row_index": i,
-                    **{k: str(v) for k, v in row.items() if v is not None} # Metadata for filtering
+                    "start_row": i,
+                    "end_row": i + len(batch) - 1,
+                    "is_grouped": True
                 }
             })
 

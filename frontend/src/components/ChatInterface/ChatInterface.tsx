@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import { Terminal, Send, Trash2, Loader2, BarChart3, Zap, ShieldAlert } from "lucide-react";
 import MetricsChart from "./MetricsChart";
@@ -11,62 +12,92 @@ import "./styles/ChatInterface.css";
 
 interface ChatInterfaceProps {
   activeFile: any;
+  sessionId: string;
+  onMessageSent: () => void;
 }
 
-export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "ai",
-      content: "System initialized. Listening for data streams or analytical queries."
-    }
-  ]);
+export default function ChatInterface({ activeFile, sessionId, onMessageSent }: ChatInterfaceProps) {
+  const queryClient = useQueryClient();
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const { data: messages = [], isLoading: isHistoryLoading } = useQuery({
+    queryKey: ["chatHistory", sessionId],
+    queryFn: async () => {
+      const history = await chatService.getChatHistory(sessionId);
+      if (!history || history.length === 0) {
+        return [{
+          role: "ai" as const,
+          content: "Session initialized. Ready for analysis."
+        }];
+      }
+      return history;
+    },
+    staleTime: 1000 * 60, // 1 minute
+  });
+
+  const sendQueryMutation = useMutation({
+    mutationFn: async (userMsg: string) => {
+      return chatService.postQuery(userMsg, activeFile?.filename, sessionId);
+    },
+    onMutate: async (userMsg) => {
+      // 1. Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries({ queryKey: ["chatHistory", sessionId] });
+
+      // 2. Snapshot the previous value
+      const previousMessages = queryClient.getQueryData<Message[]>(["chatHistory", sessionId]) || [];
+
+      // 3. Optimistically update to the new value
+      queryClient.setQueryData(["chatHistory", sessionId], [
+        ...previousMessages,
+        { role: "user", content: userMsg }
+      ]);
+
+      // 4. Return a context object with the snapshotted value
+      return { previousMessages };
+    },
+    onError: (err, userMsg, context) => {
+      // Rollback to previous state
+      if (context?.previousMessages) {
+        queryClient.setQueryData(["chatHistory", sessionId], context.previousMessages);
+      }
+      console.error("Query failed:", err);
+      alert("Error sending message: " + (err instanceof Error ? err.message : "Internal Server Error"));
+    },
+    onSettled: () => {
+      // Invalidate and refetch
+      queryClient.invalidateQueries({ queryKey: ["chatHistory", sessionId] });
+      onMessageSent();
+    },
+  });
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading]);
-
-  useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const history = await chatService.getChatHistory();
-        if (history && history.length > 0) {
-          setMessages(history);
-        }
-      } catch (err) {
-        console.error("Failed to fetch chat history:", err);
-      }
-    };
-    fetchHistory();
-  }, []);
+  }, [messages, isHistoryLoading, isSending]);
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isSending) return;
 
     const userMsg = input;
     setInput("");
-    setMessages(prev => [...prev, { role: "user", content: userMsg }]);
-    setIsLoading(true);
+    setIsSending(true);
 
     try {
-      const data = await chatService.postQuery(userMsg);
-      setMessages(prev => [...prev, { role: "ai", content: data.answer, data: data }]);
-    } catch (err: any) {
-      setMessages(prev => [...prev, { role: "ai", content: "Error: " + (err.response?.data?.message || err.message) }]);
+      await sendQueryMutation.mutateAsync(userMsg);
     } finally {
-      setIsLoading(false);
+      setIsSending(false);
     }
   };
 
   const handleClear = async () => {
-    if (isLoading) return;
+    if (isHistoryLoading || isSending) return;
     try {
-      await chatService.deleteChatHistory();
-      setMessages([{ role: "ai", content: "History cleared. Waiting for input." }]);
+      await chatService.deleteChatHistory(sessionId);
+      queryClient.invalidateQueries({ queryKey: ["chatHistory", sessionId] });
+      onMessageSent();
     } catch (err) {
       console.error(err);
     }
@@ -145,7 +176,7 @@ export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
             </div>
           </div>
         ))}
-        {isLoading && (
+        {(isHistoryLoading || isSending) && (
           <div className="terminal-line ai loading">
             <span className="prompt-indicator">┃</span>
             <div className="terminal-content" style={{ display: 'flex', alignItems: 'center', height: '100px', overflow: 'hidden' }}>
@@ -168,7 +199,7 @@ export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={activeFile ? "Enter command or query..." : "Please upload a data source..."}
-            disabled={!activeFile || isLoading}
+            disabled={!activeFile || isSending}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             autoFocus
           />
@@ -176,8 +207,8 @@ export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
             <button className="icon-btn" onClick={handleClear} title="Clear Terminal">
               <Trash2 size={16} />
             </button>
-            <button className="icon-btn primary" onClick={handleSend} disabled={!input.trim() || isLoading}>
-              {isLoading ? <Loader2 size={16} className="spin" /> : <Terminal size={16} />}
+            <button className="icon-btn primary" onClick={handleSend} disabled={!input.trim() || isSending}>
+              {isSending ? <Loader2 size={16} className="spin" /> : <Terminal size={16} />}
             </button>
           </div>
         </div>

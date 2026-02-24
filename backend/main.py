@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 import logging
 from config import settings
 from models.request_models import QueryRequest
@@ -12,15 +12,23 @@ from modules.storage.file_manager import FileManager
 from modules.rag.vector_store import VectorStore
 from modules.llm.analyst_agent import AnalystAgent
 from utils.job_tracker import JobTracker
-
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
+# Global agent instance
+_analyst_agent: Optional[AnalystAgent] = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    global _analyst_agent
     logger.info("Starting up backend...")
+    
+    # Pre-initialize AnalystAgent (loads models, connects to DB)
+    client = get_llm_client()
+    _analyst_agent = AnalystAgent(client=client)
+    
     yield
     # Shutdown
     logger.info("Shutting down backend...")
@@ -57,8 +65,12 @@ def get_embedding_client():
         return ZaiClient(api_key=settings.ZAI_API_KEY)
     return OpenAI(api_key=settings.OPENAI_API_KEY)
 
-def get_analyst_agent(client: Any = Depends(get_llm_client)):
-    return AnalystAgent(client=client)
+def get_analyst_agent():
+    if _analyst_agent is None:
+        # Fallback in case lifespan wasn't triggered (e.g. some tests)
+        client = get_llm_client()
+        return AnalystAgent(client=client)
+    return _analyst_agent
 
 @app.get("/")
 async def root():
@@ -115,14 +127,22 @@ async def query_analyst(request: QueryRequest, agent: AnalystAgent = Depends(get
         latest_files = file_manager.list_files()
         data_context = []
         if latest_files:
-            latest_file = sorted(latest_files, key=lambda x: x["created_at"], reverse=True)[0]
-            parsing_result = parser.parse_file(latest_file["path"])
+            # Choose specific file if requested, else latest
+            if request.filename:
+                target_file = next((f for f in latest_files if f["filename"] == request.filename), None)
+                if not target_file:
+                    raise HTTPException(status_code=404, detail=f"File {request.filename} not found")
+            else:
+                target_file = sorted(latest_files, key=lambda x: x["created_at"], reverse=True)[0]
+            
+            parsing_result = parser.parse_file(target_file["path"])
             data_context = parsing_result["data"]
 
         return agent.analyze(
             request.question, 
             data_context=data_context, 
-            session_id=request.session_id or "default"
+            session_id=request.session_id or "default",
+            filename=request.filename
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -136,6 +156,14 @@ async def get_chat_history(session_id: str = "default", agent: AnalystAgent = De
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/chat/sessions")
+async def list_chat_sessions(agent: AnalystAgent = Depends(get_analyst_agent)):
+    """List all available chat sessions."""
+    try:
+        return agent.memory.list_sessions()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/chat/history")
 async def clear_chat_history(session_id: str = "default", agent: AnalystAgent = Depends(get_analyst_agent)):
     """Clear chat history for a specific session."""
@@ -144,6 +172,20 @@ async def clear_chat_history(session_id: str = "default", agent: AnalystAgent = 
         return {"message": f"Chat history for session '{session_id}' cleared"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/files/{filename}")
+async def delete_file(filename: str):
+    """Delete a specific file and reset the vector store."""
+    file_manager = FileManager()
+    vector_store = VectorStore()
+    
+    deleted = file_manager.delete_file(filename)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"File {filename} not found")
+    
+    # Reset vector store to ensure consistency (targeted deletion could be complex)
+    vector_store.reset()
+    return {"message": f"File '{filename}' deleted and index reset"}
 
 @app.get("/files", response_model=List[FileInfo])
 async def list_files():

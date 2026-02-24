@@ -137,7 +137,7 @@ class AnalystAgent:
             
         return json.dumps(metrics, indent=2)
 
-    def analyze(self, user_query: str, data_context: List[Dict[str, Any]] = None, session_id: str = "default") -> AnalysisResponse:
+    def analyze(self, user_query: str, data_context: List[Dict[str, Any]] = None, session_id: str = "default", filename: str = None) -> AnalysisResponse:
         """
         Orchestrate the analysis by combining RAG, python math, and session history.
         """
@@ -145,8 +145,8 @@ class AnalystAgent:
         history = self.memory.get_history(session_id, limit=6)
         history_text = "\n".join([f"{m['role'].capitalize()}: {m['content'][:200]}..." for m in history])
         
-        # 2. Get RAG context
-        rag_context = self.retriever.get_context(user_query, top_k=5)
+        # 2. Get RAG context (filtered by filename if provided)
+        rag_context = self.retriever.get_context(user_query, top_k=5, filename=filename)
 
         # 3. Get calculated metrics
         metrics_context = self._prepare_metrics_context(data_context) if data_context else "No table data provided."
@@ -184,7 +184,11 @@ class AnalystAgent:
             
             # 5. Save to Memory
             self.memory.add_message(session_id, "user", user_query)
-            self.memory.add_message(session_id, "assistant", parsed_response.answer)
+            
+            # Save assistant message with full metadata for charts/metrics in history
+            response_data = parsed_response.model_dump()
+            # We already save 'answer' as content, but it's safe to keep in data too for simplicity
+            self.memory.add_message(session_id, "assistant", parsed_response.answer, data=response_data)
             
             return parsed_response
 

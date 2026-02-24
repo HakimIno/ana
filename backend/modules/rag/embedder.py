@@ -1,3 +1,4 @@
+import multiprocessing
 from typing import List, Any
 from openai import OpenAI
 from zai import ZaiClient
@@ -9,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 class Embedder:
     """Wrapper for embeddings with batch processing support (OpenAI or Z.AI)."""
+    
+    _sparse_model = None
+    _sparse_lock = multiprocessing.Lock()
 
     def __init__(self, client: Any = None, provider: str = settings.EMBEDDING_PROVIDER):
         self.provider = provider
@@ -24,15 +28,18 @@ class Embedder:
         
         self.model = settings.ZAI_EMBEDDING_MODEL if provider == "zai" else settings.OPENAI_EMBEDDING_MODEL
         
-        # Initialize Sparse Encoder for Hybrid Search
-        logger.info("Initializing SparseTextEmbedding model (Splade_PP_en_v1)")
-        # Phase 3: Hardware optimization (using CPU threads efficiently)
-        import multiprocessing
-        cpus = multiprocessing.cpu_count()
-        self.sparse_model = SparseTextEmbedding(
-            model_name="prithivida/Splade_PP_en_v1",
-            threads=max(1, cpus // 2) # Use about half of available cores to prevent system locking
-        )
+        # Initialize Sparse Encoder for Hybrid Search as a Singleton
+        if Embedder._sparse_model is None:
+            with Embedder._sparse_lock:
+                if Embedder._sparse_model is None:
+                    logger.info("Initializing SparseTextEmbedding model (Splade_PP_en_v1)")
+                    cpus = multiprocessing.cpu_count()
+                    Embedder._sparse_model = SparseTextEmbedding(
+                        model_name="prithivida/Splade_PP_en_v1",
+                        threads=max(1, cpus // 2)
+                    )
+        
+        self.sparse_model = Embedder._sparse_model
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         """Generate dense embeddings for a list of texts."""

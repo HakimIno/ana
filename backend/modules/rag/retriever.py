@@ -13,7 +13,7 @@ class Retriever:
         self.vector_store = vector_store
         self.ranker = ranker or Ranker()
 
-    def get_context(self, query: str, top_k: int = 5) -> str:
+    def get_context(self, query: str, top_k: int = 5, filename: str = None) -> str:
         """
         Embed the query and retrieve relevant chunks using Hybrid Search & Reranking.
         """
@@ -23,10 +23,13 @@ class Retriever:
             query_sparse = self.embedder.get_sparse_embeddings([query])[0]
             
             # 2. Search vector store (Initial larger pool for reranking)
+            filter_metadata = {"filename": filename} if filename else None
+            
             search_results = self.vector_store.query(
                 query_embedding=query_vector,
                 query_sparse=query_sparse,
-                n_results=top_k * 3 # Fetch more for reranking
+                n_results=top_k * 3, # Fetch more for reranking
+                filter_metadata=filter_metadata
             )
             
             docs = search_results.get("documents", [[]])[0]

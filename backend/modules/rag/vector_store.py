@@ -42,7 +42,10 @@ class VectorStore:
         
         self.client = VectorStore._client
         self.collection_name = settings.QDRANT_COLLECTION_NAME
-        self._ensure_collection()
+        
+        if not getattr(VectorStore, f"_collection_checked_{self.collection_name}", False):
+            self._ensure_collection()
+            setattr(VectorStore, f"_collection_checked_{self.collection_name}", True)
 
     def _ensure_collection(self):
         """Ensure the collection exists with hybrid configuration."""
@@ -122,8 +125,8 @@ class VectorStore:
         )
         logger.info(f"Upserted {len(points)} points (Hybrid) to {self.collection_name}")
 
-    def query(self, query_embedding: List[float], query_sparse: Any = None, n_results: int = 5) -> Dict[str, Any]:
-        """Search using Hybrid Search (Dense + Sparse)."""
+    def query(self, query_embedding: List[float], query_sparse: Any = None, n_results: int = 5, filter_metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Search using Hybrid Search (Dense + Sparse) with optional metadata filtering."""
         
         prefetch = [
             models.Prefetch(query=query_embedding, limit=n_results),
@@ -136,10 +139,23 @@ class VectorStore:
             )
             prefetch.append(models.Prefetch(query=sparse_vec, using="text-sparse", limit=n_results))
 
+        query_filter = None
+        if filter_metadata:
+            conditions = []
+            for key, value in filter_metadata.items():
+                conditions.append(
+                    models.FieldCondition(
+                        key=f"metadata.{key}",
+                        match=models.MatchValue(value=value)
+                    )
+                )
+            query_filter = models.Filter(must=conditions)
+
         results = self.client.query_points(
             collection_name=self.collection_name,
             prefetch=prefetch,
             query=models.FusionQuery(fusion=models.Fusion.RRF),
+            filter=query_filter,
             limit=n_results,
         ).points
         
