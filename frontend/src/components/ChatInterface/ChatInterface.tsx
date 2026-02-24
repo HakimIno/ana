@@ -5,12 +5,9 @@ import ReactMarkdown from "react-markdown";
 import { Terminal, Send, Trash2, Loader2, BarChart3, Zap, ShieldAlert } from "lucide-react";
 import MetricsChart from "./MetricsChart";
 import BrainFlow from "../Brainflow";
-
-interface Message {
-  role: "user" | "ai";
-  content: string;
-  data?: any;
-}
+import { Message } from "@/types/chat";
+import { chatService } from "@/services/api";
+import "./styles/ChatInterface.css";
 
 interface ChatInterfaceProps {
   activeFile: any;
@@ -36,12 +33,9 @@ export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const response = await fetch("http://localhost:8000/chat/history?session_id=default");
-        if (response.ok) {
-          const history = await response.json();
-          if (history && history.length > 0) {
-            setMessages(history);
-          }
+        const history = await chatService.getChatHistory();
+        if (history && history.length > 0) {
+          setMessages(history);
         }
       } catch (err) {
         console.error("Failed to fetch chat history:", err);
@@ -59,18 +53,10 @@ export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
     setIsLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8000/query", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: userMsg }),
-      });
-
-      if (!response.ok) throw new Error("Connection failed");
-
-      const data = await response.json();
+      const data = await chatService.postQuery(userMsg);
       setMessages(prev => [...prev, { role: "ai", content: data.answer, data: data }]);
     } catch (err: any) {
-      setMessages(prev => [...prev, { role: "ai", content: "Error: " + err.message }]);
+      setMessages(prev => [...prev, { role: "ai", content: "Error: " + (err.response?.data?.message || err.message) }]);
     } finally {
       setIsLoading(false);
     }
@@ -79,7 +65,7 @@ export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
   const handleClear = async () => {
     if (isLoading) return;
     try {
-      await fetch("http://localhost:8000/chat/history?session_id=default", { method: "DELETE" });
+      await chatService.deleteChatHistory();
       setMessages([{ role: "ai", content: "History cleared. Waiting for input." }]);
     } catch (err) {
       console.error(err);
@@ -196,273 +182,6 @@ export default function ChatInterface({ activeFile }: ChatInterfaceProps) {
           </div>
         </div>
       </div>
-
-      <style jsx>{`
-        .terminal-chat {
-          height: 100%;
-          display: flex;
-          flex-direction: column;
-          background: var(--bg-color);
-          font-family: var(--font-mono);
-          position: relative;
-        }
-
-        .output-stream {
-          flex: 1;
-          overflow-y: auto;
-          padding: 40px;
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-        }
-
-        .terminal-line {
-          display: flex;
-          gap: 16px;
-        }
-
-        .prompt-indicator {
-          font-weight: bold;
-          flex-shrink: 0;
-          padding-top: 2px;
-        }
-
-        .user .prompt-indicator { color: var(--accent-color); }
-        .ai .prompt-indicator { color: var(--text-secondary); opacity: 0.5; }
-
-        .terminal-content {
-          flex: 1;
-          font-size: 14px;
-          line-height: 1.6;
-          color: var(--text-primary);
-        }
-
-        .user .text-payload {
-          color: var(--text-primary);
-          font-weight: 500;
-        }
-
-        .data-attachments {
-          margin-top: 20px;
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-        }
-
-        .chart-wrapper {
-          background: #000;
-          border: 1px solid var(--border-color);
-          padding: 10px;
-          border-radius: 4px;
-        }
-
-        .summary-title {
-          font-size: 11px;
-          font-weight: 700;
-          color: var(--text-secondary);
-          margin-bottom: 12px;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-        }
-
-        .metrics-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-          gap: 12px;
-          margin-top: 10px;
-        }
-
-        .metric-item {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-          background: #0a0a0a;
-          border: 1px solid #1a1a1a;
-          padding: 12px 16px;
-          border-radius: 4px;
-          transition: all 0.2s ease;
-        }
-
-        .metric-item:hover {
-          border-color: var(--accent-color);
-          background: #111;
-          transform: translateY(-2px);
-        }
-    
-        .metric-item .key { 
-          color: var(--text-secondary); 
-          font-size: 10px;
-          text-transform: uppercase;
-          letter-spacing: 0.1em;
-        }
-        .metric-item .val { 
-          color: var(--accent-color); 
-          font-weight: 600; 
-          font-size: 16px;
-          font-family: var(--font-mono);
-        }
-
-        .insight-block ul {
-          list-style: none;
-          padding: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-
-        .insight-block li {
-          font-size: 13px;
-          color: var(--text-primary);
-        }
-
-        .recommendations .summary-title { color: var(--accent-color); }
-        .risks .summary-title { color: var(--error); }
-
-        .ai-thought-process {
-          background: rgba(var(--accent-rgb), 0.05);
-          border-left: 2px solid var(--accent-color);
-          padding: 8px 12px;
-          margin-bottom: 12px;
-          font-size: 11px;
-          color: var(--text-secondary);
-          animation: revealAndFade 6s forwards;
-          border-radius: 0 4px 4px 0;
-          overflow: hidden;
-        }
-
-        .thought-header {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-weight: bold;
-          font-size: 9px;
-          letter-spacing: 0.1em;
-          margin-bottom: 4px;
-          color: var(--accent-color);
-        }
-
-        .pulse-icon {
-          animation: pulse 1.5s infinite;
-        }
-
-        @keyframes revealAndFade {
-          0% { opacity: 0; max-height: 0; transform: translateY(-10px); }
-          10% { opacity: 0.8; max-height: 200px; transform: translateY(0); }
-          80% { opacity: 0.8; max-height: 200px; }
-          100% { opacity: 0; max-height: 0; margin-bottom: 0; padding: 0; }
-        }
-
-        .thinking {
-          color: var(--accent-color);
-          font-size: 13px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        
-        .thinking::after {
-          content: '...';
-          animation: dots 1.5s steps(5, end) infinite;
-          width: 20px;
-        }
-
-        @keyframes dots {
-          0%, 20% { content: '.'; }
-          40% { content: '..'; }
-          60% { content: '...'; }
-        }
-
-        @keyframes pulse {
-          0%, 100% { opacity: 0.4; }
-          50% { opacity: 1; }
-        }
-
-        .prompt-area {
-          padding: 20px 40px 40px;
-          background: linear-gradient(transparent, var(--bg-color) 40%);
-        }
-
-        .input-strip {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          background: var(--surface-color);
-          border: 1px solid var(--border-color);
-          padding: 8px 16px;
-          border-radius: 4px;
-        }
-
-        .input-prompt {
-          color: var(--accent-color);
-          font-weight: 600;
-          font-size: 13px;
-          white-space: nowrap;
-        }
-
-        input {
-          flex: 1;
-          background: transparent !important;
-          border: none !important;
-          padding: 8px 0 !important;
-          font-size: 14px;
-          color: white;
-          outline: none;
-        }
-
-        .actions {
-          display: flex;
-          gap: 8px;
-        }
-
-        .icon-btn {
-          background: transparent;
-          border: none;
-          color: var(--text-secondary);
-          width: 32px;
-          height: 32px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          cursor: pointer;
-          border-radius: 4px;
-          transition: all 0.2s;
-        }
-
-        .icon-btn:hover:not(:disabled) {
-          background: #1a1a1a;
-          color: white;
-        }
-
-        .icon-btn.primary {
-          color: var(--accent-color);
-        }
-
-        .icon-btn.primary:hover:not(:disabled) {
-          background: var(--accent-color);
-          color: white;
-        }
-
-        .icon-btn:disabled {
-          opacity: 0.3;
-          cursor: not-allowed;
-        }
-
-        .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
-        /* Custom Scrollbar */
-        .output-stream::-webkit-scrollbar { width: 4px; }
-        .output-stream::-webkit-scrollbar-track { background: transparent; }
-        .output-stream::-webkit-scrollbar-thumb { background: #222; border-radius: 10px; }
-        .output-stream::-webkit-scrollbar-thumb:hover { background: #333; }
-
-        .tree-animation {
-          display: flex;
-          justify-content: center;
-          align-items: center;
-        }
-      `}</style>
     </div>
   );
 }
