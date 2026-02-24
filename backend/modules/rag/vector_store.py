@@ -155,7 +155,7 @@ class VectorStore:
             collection_name=self.collection_name,
             prefetch=prefetch,
             query=models.FusionQuery(fusion=models.Fusion.RRF),
-            filter=query_filter,
+            query_filter=query_filter, # Already fixed to query_filter
             limit=n_results,
         ).points
         

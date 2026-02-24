@@ -51,6 +51,8 @@ async def process_file_async(
     chunker = Chunker()
     vector_store = VectorStore()
     embedder = Embedder(client=embedding_client)
+    from modules.storage.metadata_manager import MetadataManager
+    meta_manager = MetadataManager()
     
     try:
         tracker.update_job(job_id, status=JobStatus.PROCESSING, progress=5, message="Parsing file")
@@ -58,6 +60,13 @@ async def process_file_async(
         # 1. Parse file (blocking call, but happens once)
         parsing_result = await asyncio.to_thread(parser.parse_file, file_path)
         tracker.update_job(job_id, progress=10, message=f"Parsed {parsing_result['row_count']} rows")
+        
+        # 1.5 Generate default metadata dictionary
+        await asyncio.to_thread(
+            meta_manager.generate_default_dictionary, 
+            filename, 
+            parsing_result["columns"]
+        )
         
         # 2. Create chunks
         chunks = chunker.create_row_chunks(parsing_result)

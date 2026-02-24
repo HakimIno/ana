@@ -142,8 +142,8 @@ input:focus {
   align-items: flex-start;
   font-family: var(--font-mono);
   font-size: 14px;
-  margin-bottom: 12px;
-  padding: 8px;
+  margin-bottom: 8px;
+  padding: 6px;
   border-radius: 6px;
   transition: background 0.2s;
 }

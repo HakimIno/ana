@@ -27,11 +27,13 @@ class AnalysisResponse(BaseModel):
     """Structured response for financial analysis."""
     answer: str
     thought: Optional[str] = None
+    python_code: Optional[str] = None
     key_metrics: Dict[str, Any]
     recommendations: List[str]
     risks: List[str]
     confidence_score: float
     charts: Optional[List[ChartConfig]] = []
+    table_data: Optional[Dict[str, Any]] = None
     chart_data: Optional[List[Dict[str, Any]]] = None # Legacy
     source_documents: Optional[List[str]] = []
     status: str = "success"

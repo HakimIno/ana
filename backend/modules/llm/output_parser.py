@@ -29,11 +29,13 @@ class OutputParser:
             return AnalysisResponse(
                 answer=parsed_data.get("answer", ""),
                 thought=parsed_data.get("thought", None),
+                python_code=parsed_data.get("python_code", None),
                 key_metrics=parsed_data.get("key_metrics", {}),
                 recommendations=parsed_data.get("recommendations", []),
                 risks=parsed_data.get("risks", []),
                 confidence_score=parsed_data.get("confidence_score", 0.0),
                 charts=charts,
+                table_data=parsed_data.get("table_data", None),
                 chart_data=chart_data,
                 source_documents=[rag_context] if rag_context else []
             )

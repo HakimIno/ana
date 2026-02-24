@@ -47,10 +47,11 @@ class FileManager:
             raise IOError(f"Failed to delete file: {e}")
 
     def list_files(self) -> List[Dict[str, Any]]:
-        """List all stored files with metadata."""
+        """List all stored files with metadata, excluding internal metadata files."""
         files = []
+        supported_exts = {".csv", ".xlsx", ".xls"}
         for file_path in self.storage_dir.iterdir():
-            if file_path.is_file():
+            if file_path.is_file() and file_path.suffix.lower() in supported_exts:
                 stats = file_path.stat()
                 files.append({
                     "filename": file_path.name,
