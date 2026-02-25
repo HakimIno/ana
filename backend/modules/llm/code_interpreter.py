@@ -27,6 +27,12 @@ class CodeInterpreter:
             locals_dict.update(dfs)
             locals_dict["dfs"] = dfs # Also provide the dict itself
         
+        # --- Pre-processing for common LLM hallucinations (Pandas vs Polars) ---
+        # 1. groupby -> group_by
+        code = code.replace(".groupby(", ".group_by(")
+        # 2. .first() on DF -> .head(1)
+        code = code.replace(".first()", ".head(1)")
+        
         try:
             # Execute the code
             exec(code, {"pl": pl}, locals_dict)

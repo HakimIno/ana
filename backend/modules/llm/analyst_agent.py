@@ -8,7 +8,7 @@ from openai import OpenAI
 from zai import ZaiClient
 
 from config import settings
-from models.response_models import AnalysisResponse
+from models.response_models import AnalysisResponse, TokenUsage
 from modules.analytics.financial_calculator import FinancialCalculator
 from modules.llm.code_interpreter import CodeInterpreter
 from modules.llm.memory.database import ChatMemory
@@ -50,7 +50,7 @@ class AnalystAgent:
             vector_store = VectorStore()
             self.retriever = Retriever(embedder=embedder, vector_store=vector_store)
 
-    def _prepare_metrics_context(self, data: Optional[List[Dict[str, Any]]] = None, filename: str = None, dfs: Optional[Dict[str, Any]] = None) -> str:
+    async def _prepare_metrics_context(self, data: Optional[List[Dict[str, Any]]] = None, filename: str = None, dfs: Optional[Dict[str, Any]] = None, include_samples: bool = True) -> str:
         """
         Creates a structured summary of the data for the AI's first turn.
         Supports single list 'data' or dictionary of 'dfs'.
@@ -85,9 +85,13 @@ class AnalystAgent:
                 df_summary = {
                     "records": len(df),
                     "columns": df.columns,
+                    "dtypes": {str(c): str(t) for c, t in df.schema.items()},
                     "numeric_metrics": numeric_cols,
                     "categorical_dimensions": dim_cols
                 }
+
+                if include_samples:
+                    df_summary["sample_data"] = df.head(3).to_dicts() # Provide actual samples to see casing/values
                 
                 if metric_col and dim_cols:
                     main_dim = dim_cols[0]
@@ -101,6 +105,17 @@ class AnalystAgent:
                 
                 multi_summaries[name] = df_summary
             
+            # 1. Join Key Detection (Cross-file intelligence)
+            join_keys = {}
+            df_names = list(dfs.keys())
+            for i in range(len(df_names)):
+                for j in range(i + 1, len(df_names)):
+                    name1, name2 = df_names[i], df_names[j]
+                    common = list(set(dfs[name1].columns) & set(dfs[name2].columns))
+                    if common:
+                        join_keys[f"{name1} <-> {name2}"] = common
+            
+            metrics["suggested_join_keys"] = join_keys
             metrics["active_dataframes"] = multi_summaries
         elif data:
             df = pl.DataFrame(data)
@@ -116,6 +131,8 @@ class AnalystAgent:
                 "numeric_metrics": numeric_cols,
                 "categorical_dimensions": dim_cols
             }
+            if include_samples:
+                metrics["dataset_scope"]["sample_data"] = df.head(3).to_dicts()
             
             # Dynamic date detection
             date_col = next((col for col, dtype in df.schema.items() if dtype.is_temporal() or "date" in col.lower() or "month" in col.lower()), None)
@@ -155,12 +172,13 @@ class AnalystAgent:
         
         return json.dumps(metrics, indent=2)
 
-    def analyze(self, user_query: str, data_context: List[Dict[str, Any]] = None, session_id: str = "default", filename: str = None, dfs: Dict[str, Any] = None) -> AnalysisResponse:
+    async def analyze(self, user_query: str, data_context: List[Dict[str, Any]] = None, session_id: str = "default", filename: str = None, dfs: Dict[str, Any] = None) -> AnalysisResponse:
         """
         Orchestrate the analysis by combining RAG, python math, and session history.
         Supports 2-step reasoning via Code Interpreter.
         """
         interpreter = CodeInterpreter()
+        total_usage = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
         
         # 1. Get Conversation History (Smarter Truncation)
         history = self.memory.get_history(session_id, limit=6)
@@ -185,8 +203,8 @@ class AnalystAgent:
         # 2. Get RAG context (filtered by filename if provided)
         rag_context = self.retriever.get_context(user_query, top_k=5, filename=filename)
 
-        # 3. Get calculated metrics
-        metrics_context = self._prepare_metrics_context(data_context, filename=filename, dfs=dfs)
+        # 3. Get calculated metrics (Include samples for Turn 1 to help AI write code)
+        metrics_context = await self._prepare_metrics_context(data_context, filename=filename, dfs=dfs, include_samples=True)
         
         # 4. First Pass: Strategic Strategy & Code Generation
         current_date_str = datetime.now().strftime("%Y-%m-%d")
@@ -222,6 +240,13 @@ class AnalystAgent:
                 create_params["response_format"] = {"type": "json_object"}
             
             response = self.client.chat.completions.create(**create_params)
+            
+            # Capture usage from first turn
+            if hasattr(response, 'usage') and response.usage:
+                total_usage.prompt_tokens += response.usage.prompt_tokens
+                total_usage.completion_tokens += response.usage.completion_tokens
+                total_usage.total_tokens += response.usage.total_tokens
+
             raw_content = response.choices[0].message.content
             
             # Use OutputParser for flexibility, but handle the 2-step case
@@ -236,12 +261,19 @@ class AnalystAgent:
                     df = pl.DataFrame(data_context)
                     exec_result = interpreter.execute(python_code, df=df)
                 
+                # TOKEN OPTIMIZATION: Regenerate metrics without samples for turn 2.
+                # The AI already has the result from the code, so it doesn't need redundant bulk JSON anymore.
+                optimized_metrics = await self._prepare_metrics_context(data_context, filename, dfs, include_samples=False)
+
                 # Step 3: Refinement with results
                 refinement_prompt = f"""
                 EXECUTION RESULTS:
                 Code: {python_code}
                 Output: {exec_result['output']}
                 Error: {exec_result['error']}
+                
+                ## UPDATED DATA SCOPE (Sample rows removed for efficiency):
+                {optimized_metrics}
                 
                 ACTION: Provide your FINAL Strategic Intelligence answer based on the results above.
                 - Your response MUST be valid JSON.
@@ -255,10 +287,17 @@ class AnalystAgent:
                 create_params["messages"].append({"role": "user", "content": refinement_prompt})
                 
                 final_response = self.client.chat.completions.create(**create_params)
+                
+                # Capture usage from second turn
+                if hasattr(final_response, 'usage') and final_response.usage:
+                    total_usage.prompt_tokens += final_response.usage.prompt_tokens
+                    total_usage.completion_tokens += final_response.usage.completion_tokens
+                    total_usage.total_tokens += final_response.usage.total_tokens
+
                 raw_content = final_response.choices[0].message.content
                 logger.info("Successfully received LLM analysis after code execution")
 
-            parsed_response = OutputParser.parse_analysis(raw_content, rag_context=rag_context)
+            parsed_response = OutputParser.parse_analysis(raw_content, rag_context=rag_context, token_usage=total_usage)
             if python_code:
                 parsed_response.python_code = python_code
 
@@ -267,7 +306,7 @@ class AnalystAgent:
 
             # 5. Save to Memory
             self.memory.add_message(session_id, "user", user_query)
-            self.memory.add_message(session_id, "assistant", parsed_response.answer, data=parsed_response.model_dump())
+            self.memory.add_message(session_id, "ai", parsed_response.answer, data=parsed_response.model_dump())
             
             return parsed_response
 

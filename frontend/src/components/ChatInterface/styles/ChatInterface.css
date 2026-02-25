@@ -38,8 +38,9 @@
 .terminal-content {
   flex: 1;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.2;
   color: var(--text-primary);
+  letter-spacing: 0.01em;
 }
 
 .user .text-payload {
@@ -118,17 +119,39 @@
   white-space: nowrap;
 }
 
+.terminal-content h3 {
+  margin: 16px 0 8px 0;
+  color: var(--accent-color);
+  font-size: 15px;
+}
+
+.terminal-content p {
+  margin-bottom: 12px;
+}
+
+.terminal-content ul,
+.terminal-content ol {
+  margin-bottom: 16px;
+  padding-left: 20px;
+}
+
+.terminal-content li {
+  margin-bottom: 6px;
+  position: relative;
+}
+
 .insight-block ul {
   list-style: none;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .insight-block li {
   font-size: 13px;
   color: var(--text-primary);
+  line-height: 1.5;
 }
 
 .analysis-table-container {

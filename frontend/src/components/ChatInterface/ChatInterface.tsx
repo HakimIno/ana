@@ -20,7 +20,7 @@ interface ChatInterfaceProps {
 // 1. Memoized Message Component to prevent re-rendering old charts/markdown
 const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
   return (
-    <div className={`terminal-line ${msg.role}`}>
+    <div className={`terminal-line ${msg.role === 'assistant' ? 'ai' : msg.role}`}>
       <span className="prompt-indicator">
         {msg.role === 'user' ? '>' : '┃'}
       </span>
@@ -109,7 +109,7 @@ const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
           </div>
         )}
 
-        {msg.role === 'ai' && msg.data?.token_usage && (
+        {(msg.role === 'ai' || msg.role === 'assistant') && msg.data?.token_usage && (
           <div className="token-usage-footer">
             <span className="token-stat">
               <Zap size={10} className="token-icon" />
@@ -160,7 +160,7 @@ const ChatInput = memo(({
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={activeFile ? "Enter command or query..." : "Please upload a data source..."}
+          placeholder={activeFile ? "Enter command or query..." : "Please select a Project or File to begin..."}
           disabled={!activeFile || isSending}
           onKeyDown={handleKeyDown}
           autoFocus
@@ -274,7 +274,7 @@ export default function ChatInterface({ activeFile, sessionId, onMessageSent }: 
             <div className="terminal-content" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '140px', justifyContent: 'center' }}>
               <BrainFlow size={80} />
               <div className="status-text-loop">
-                {isHistoryLoading ? "Recovering session memory..." : "PROGRAMMATIC_ANALYSIS_IN_PROGRESS"}
+                {isHistoryLoading ? "Recovering session memory..." : "Programmatic analysis in progress..."}
               </div>
             </div>
           </div>

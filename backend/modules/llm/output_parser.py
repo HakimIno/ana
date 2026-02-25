@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional
+from typing import Optional, Any
 from models.response_models import AnalysisResponse
 
 logger = logging.getLogger(__name__)
@@ -9,7 +9,7 @@ class OutputParser:
     """Parses and validates LLM's raw JSON responses into AnalysisResponse."""
 
     @staticmethod
-    def parse_analysis(raw_content: str, rag_context: Optional[str] = None) -> AnalysisResponse:
+    def parse_analysis(raw_content: str, rag_context: Optional[str] = None, token_usage: Optional[Any] = None) -> AnalysisResponse:
         """Parse raw JSON string into AnalysisResponse Pydantic model."""
         try:
             parsed_data = json.loads(raw_content)
@@ -30,6 +30,7 @@ class OutputParser:
                 answer=parsed_data.get("answer", ""),
                 thought=parsed_data.get("thought", None),
                 python_code=parsed_data.get("python_code", None),
+                token_usage=token_usage,
                 key_metrics=parsed_data.get("key_metrics", {}),
                 recommendations=parsed_data.get("recommendations", []),
                 risks=parsed_data.get("risks", []),

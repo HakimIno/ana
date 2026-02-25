@@ -44,13 +44,6 @@ export default function Home() {
     queryFn: () => chatService.listSessions()
   });
 
-  // Set default active file when files load
-  useEffect(() => {
-    if (files.length > 0 && !activeFile) {
-      const sorted = [...files].sort((a: any, b: any) => b.created_at - a.created_at);
-      setActiveFile({ ...sorted[0], type: 'file' });
-    }
-  }, [files, activeFile]);
 
   // --- Mutations ---
   const deleteFileMutation = useMutation({

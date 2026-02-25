@@ -171,7 +171,7 @@ async def query_analyst(request: QueryRequest, agent: AnalystAgent = Depends(get
             
             data_context = None # We will use dfs in the agent
 
-        return agent.analyze(
+        return await agent.analyze(
             request.question, 
             data_context=data_context, 
             session_id=request.session_id or "default",
