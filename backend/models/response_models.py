@@ -23,11 +23,18 @@ class ChartConfig(BaseModel):
     title: str
     data: List[Dict[str, Any]]
 
+class TokenUsage(BaseModel):
+    """Token usage for LLM requests."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
 class AnalysisResponse(BaseModel):
     """Structured response for financial analysis."""
     answer: str
     thought: Optional[str] = None
     python_code: Optional[str] = None
+    token_usage: Optional[TokenUsage] = None
     key_metrics: Dict[str, Any]
     recommendations: List[str]
     risks: List[str]
@@ -43,3 +50,4 @@ class FileInfo(BaseModel):
     filename: str
     size: int
     created_at: float
+    group: Optional[str] = None

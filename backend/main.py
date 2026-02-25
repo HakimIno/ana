@@ -11,6 +11,7 @@ from modules.ingestion.async_processor import process_file_async
 from modules.storage.file_manager import FileManager
 from modules.rag.vector_store import VectorStore
 from modules.llm.analyst_agent import AnalystAgent
+from modules.storage.metadata_manager import MetadataManager
 from utils.job_tracker import JobTracker
 from contextlib import asynccontextmanager
 
@@ -120,31 +121,65 @@ async def get_upload_status(job_id: str):
 
 @app.post("/query", response_model=AnalysisResponse)
 async def query_analyst(request: QueryRequest, agent: AnalystAgent = Depends(get_analyst_agent)):
-    """Ask a natural language question about the uploaded data."""
+    """Ask a natural language question about one or more files."""
     file_manager = FileManager()
+    meta_manager = MetadataManager()
     parser = ExcelParser()
     try:
-        latest_files = file_manager.list_files()
         data_context = []
-        if latest_files:
-            # Choose specific file if requested, else latest
-            if request.filename:
-                target_file = next((f for f in latest_files if f["filename"] == request.filename), None)
-                if not target_file:
-                    raise HTTPException(status_code=404, detail=f"File {request.filename} not found")
-            else:
-                target_file = sorted(latest_files, key=lambda x: x["created_at"], reverse=True)[0]
+        target_filenames = []
+        
+        # 1. Determine target files
+        if request.group:
+            all_files = file_manager.list_files()
+            target_filenames = [
+                f["filename"] for f in all_files 
+                if meta_manager.get_group(f["filename"]) == request.group
+            ]
+            if not target_filenames:
+                raise HTTPException(status_code=404, detail=f"No files found for group: {request.group}")
+        elif request.filenames:
+            target_filenames = request.filenames
+        elif request.filename:
+            target_filenames = [request.filename]
+        else:
+            # Fallback to latest file
+            all_files = file_manager.list_files()
+            if all_files:
+                latest = sorted(all_files, key=lambda x: x["created_at"], reverse=True)[0]
+                target_filenames = [latest["filename"]]
+
+        # 2. Parse and combine data
+        if target_filenames:
+            dfs = {}
+            import polars as pl
+            for fname in target_filenames:
+                f_path = file_manager.get_file_path(fname)
+                parsing_result = parser.parse_file(str(f_path))
+                
+                # Create split DFs for Code Interpreter
+                # Use clean name as key: e.g. "shabu_sales_2023_2026.csv" -> "shabu_sales"
+                df_key = fname.lower().replace(".csv", "").replace(".xlsx", "").replace(".xls", "")
+                # If name is too long, take parts
+                if "_" in df_key:
+                    parts = df_key.split("_")
+                    if len(parts) > 1:
+                        df_key = "_".join(parts[:2])
+                
+                df_obj = pl.DataFrame(parsing_result["data"])
+                dfs[df_key] = df_obj
             
-            parsing_result = parser.parse_file(target_file["path"])
-            data_context = parsing_result["data"]
+            data_context = None # We will use dfs in the agent
 
         return agent.analyze(
             request.question, 
             data_context=data_context, 
             session_id=request.session_id or "default",
-            filename=request.filename
+            filename=", ".join(target_filenames) if target_filenames else "None",
+            dfs=dfs if target_filenames else None
         )
     except Exception as e:
+        logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/chat/history")
@@ -189,9 +224,23 @@ async def delete_file(filename: str):
 
 @app.get("/files", response_model=List[FileInfo])
 async def list_files():
-    """List all uploaded files."""
+    """List all uploaded files with group tags."""
     file_manager = FileManager()
-    return file_manager.list_files()
+    meta_manager = MetadataManager()
+    files = file_manager.list_files()
+    
+    # Inject group info for each file
+    for f in files:
+        f["group"] = meta_manager.get_group(f["filename"])
+        
+    return files
+
+@app.patch("/files/{filename}")
+async def update_file_group(filename: str, group: str):
+    """Assign or update a category/group for a specific file."""
+    meta_manager = MetadataManager()
+    meta_manager.save_group(filename, group)
+    return {"message": f"File '{filename}' assigned to group '{group}'"}
 
 @app.delete("/files")
 async def clear_storage():
@@ -201,6 +250,27 @@ async def clear_storage():
     file_manager.cleanup()
     vector_store.reset()
     return {"message": "Storage and index cleared"}
+
+@app.post("/files/sync")
+async def sync_files(background_tasks: BackgroundTasks, client: Any = Depends(get_embedding_client)):
+    """Sync all files in uploads with the vector store."""
+    file_manager = FileManager()
+    tracker = JobTracker()
+    files = file_manager.list_files()
+    
+    results = []
+    for f in files:
+        job_id = tracker.create_job()
+        background_tasks.add_task(
+            process_file_async, 
+            job_id, 
+            f["path"], 
+            f["filename"], 
+            client
+        )
+        results.append({"filename": f["filename"], "job_id": job_id})
+    
+    return {"message": "Sync jobs started", "jobs": results}
 
 if __name__ == "__main__":
     import uvicorn

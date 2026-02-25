@@ -108,6 +108,15 @@ const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
             )}
           </div>
         )}
+
+        {msg.role === 'ai' && msg.data?.token_usage && (
+          <div className="token-usage-footer">
+            <span className="token-stat">
+              <Zap size={10} className="token-icon" />
+              Tokens: {msg.data.token_usage.total_tokens} (P: {msg.data.token_usage.prompt_tokens} | C: {msg.data.token_usage.completion_tokens})
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -197,7 +206,12 @@ export default function ChatInterface({ activeFile, sessionId, onMessageSent }: 
 
   const sendQueryMutation = useMutation({
     mutationFn: async (userMsg: string) => {
-      return chatService.postQuery(userMsg, activeFile?.filename, sessionId);
+      return chatService.postQuery(
+        userMsg,
+        activeFile?.type === 'file' ? activeFile?.filename : undefined,
+        sessionId,
+        activeFile?.type === 'group' ? activeFile?.group : undefined
+      );
     },
     onMutate: async (userMsg) => {
       await queryClient.cancelQueries({ queryKey: ["chatHistory", sessionId] });

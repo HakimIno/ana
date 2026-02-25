@@ -1,17 +1,23 @@
-from typing import List, Dict, Any
+from datetime import datetime
+import json
+import logging
+from typing import List, Dict, Any, Optional
+
+import polars as pl
 from openai import OpenAI
 from zai import ZaiClient
-from modules.llm.prompts import ANALYST_SYSTEM_PROMPT
+
+from config import settings
+from models.response_models import AnalysisResponse
 from modules.analytics.financial_calculator import FinancialCalculator
-from modules.rag.vector_store import VectorStore
+from modules.llm.code_interpreter import CodeInterpreter
+from modules.llm.memory.database import ChatMemory
+from modules.llm.output_parser import OutputParser
+from modules.llm.prompts import ANALYST_SYSTEM_PROMPT, QUERY_PROMPT_TEMPLATE
 from modules.rag.embedder import Embedder
 from modules.rag.retriever import Retriever
-from config import settings
-import logging
-import json
-from modules.llm.memory.database import ChatMemory
-from models.response_models import AnalysisResponse
-from modules.llm.output_parser import OutputParser
+from modules.rag.vector_store import VectorStore
+from modules.storage.metadata_manager import MetadataManager
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +40,6 @@ class AnalystAgent:
         self.memory = ChatMemory()
         self.model_name = settings.GLM_MODEL if settings.CHAT_PROVIDER == "zai" else settings.OPENAI_MODEL
         
-        from modules.storage.metadata_manager import MetadataManager
         self.metadata_manager = MetadataManager()
         
         # If retriever is not provided, initialize standard stack
@@ -45,87 +50,116 @@ class AnalystAgent:
             vector_store = VectorStore()
             self.retriever = Retriever(embedder=embedder, vector_store=vector_store)
 
-    def _prepare_metrics_context(self, data: List[Dict[str, Any]], filename: str = None) -> str:
-        """Calculate summary metrics for the LLM context using Polars to prevent LLM math."""
-        if not data:
-            return "No numerical data available for metrics."
-        
-        import polars as pl
-        df = pl.DataFrame(data)
+    def _prepare_metrics_context(self, data: Optional[List[Dict[str, Any]]] = None, filename: str = None, dfs: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Creates a structured summary of the data for the AI's first turn.
+        Supports single list 'data' or dictionary of 'dfs'.
+        """
         metrics = {}
-        
+
         # 0. Data Dictionary (Schema Binding)
         if filename:
-            metrics["data_dictionary"] = self.metadata_manager.get_dictionary(filename)
-        numeric_cols = [col for col, dtype in df.schema.items() if dtype.is_numeric()]
-        dimension_cols = [col for col in df.columns if col in ["category", "dept", "department", "region", "status", "subcategory", "priority"]]
-        
-        metrics["dataset_scope"] = {
-            "total_records": len(df),
-            "columns": df.columns,
-            "numeric_columns": numeric_cols,
-            "available_dimensions": dimension_cols
-        }
-        
-        if month_col := next((c for c in ["month", "date"] if c in df.columns), None):
-            metrics["dataset_scope"]["date_range"] = {
-                "start": str(df[month_col].min()),
-                "end": str(df[month_col].max())
-            }
-        
-        # 1. Individual Dimension Summaries (Multi-Column Protection)
-        revenue_col = next((c for c in ["revenue", "totalamount", "total_amount", "amount"] if c in df.columns), None)
-        
-        if revenue_col:
-            dim_summaries = {}
-            for col in dimension_cols:
-                # Group by each dimension to ensure AI sees specific column totals
-                summary = df.group_by(col).agg(pl.col(revenue_col).sum()).sort(revenue_col, descending=True)
-                dim_summaries[f"totals_by_{col}"] = summary.to_dicts()
-            
-            metrics["dimension_performance_matrix"] = dim_summaries
+            filenames = [f.strip() for f in filename.split(",")]
+            combined_dict = {}
+            for fname in filenames:
+                file_dict = self.metadata_manager.get_dictionary(fname)
+                if file_dict:
+                    combined_dict[fname] = file_dict
+            metrics["data_dictionaries"] = combined_dict
 
-            # 2. Cross-Dimensional Matrix (e.g., Dept + Status)
-            # Find status and a primary dimension (dept/category)
-            status_col = next((c for c in ["status", "priority"] if c in df.columns), None)
-            main_dim = next((c for c in ["department", "dept", "category"] if c in df.columns and c != status_col), None)
-            
-            if status_col and main_dim:
-                cross_tab = df.group_by([main_dim, status_col]).agg(pl.col(revenue_col).sum()).sort([main_dim, status_col])
-                metrics["cross_dimensional_performance"] = {
-                    "description": f"Revenue breakdown by {main_dim} and {status_col}",
-                    "data": cross_tab.to_dicts()
+        # Process data
+        if dfs:
+            # Multi-file summary
+            multi_summaries = {}
+            for name, df in dfs.items():
+                numeric_cols = [col for col, dtype in df.schema.items() if dtype.is_numeric()]
+                # Dynamic Dimension Detection: String/Categorical with reasonable cardinality
+                dim_cols = [
+                    col for col, dtype in df.schema.items() 
+                    if (dtype == pl.Utf8 or dtype == pl.Categorical) and 1 < df[col].n_unique() < 30
+                ]
+                
+                # Top metric detection (avoiding IDs)
+                metric_col = next((c for c in numeric_cols if "id" not in c.lower() and "index" not in c.lower()), None)
+                
+                df_summary = {
+                    "records": len(df),
+                    "columns": df.columns,
+                    "numeric_metrics": numeric_cols,
+                    "categorical_dimensions": dim_cols
                 }
-
-            # 3. Trending Analysis
-            month_col = next((c for c in ["month", "date", "timestamp"] if c in df.columns), None)
-            if month_col:
-                trend = df.group_by(month_col).agg(pl.col(revenue_col).sum()).sort(month_col)
-                trend_list = trend.to_dicts()
-                enhanced_trend = []
-                for j in range(len(trend_list)):
-                    current_rev = float(trend_list[j][revenue_col])
-                    row = {"label": str(trend_list[j][month_col]), "value": round(current_rev, 2)}
-                    enhanced_trend.append(row)
-                metrics["revenue_trend_analysis"] = enhanced_trend
-
-            # 4. Outlier detection
-            top_5 = df.sort(revenue_col, descending=True).head(5)
-            metrics["top_performing_transactions"] = top_5.to_dicts()
-        
-        # 5. General summary stats for all numeric cols
-        for col in numeric_cols:
-            if col != revenue_col: # Skip redundant stats for main revenue if already trended
+                
+                if metric_col and dim_cols:
+                    main_dim = dim_cols[0]
+                    df_summary[f"top_5_{main_dim}_by_{metric_col}"] = (
+                        df.group_by(main_dim)
+                        .agg(pl.col(metric_col).sum())
+                        .sort(metric_col, descending=True)
+                        .head(5)
+                        .to_dicts()
+                    )
+                
+                multi_summaries[name] = df_summary
+            
+            metrics["active_dataframes"] = multi_summaries
+        elif data:
+            df = pl.DataFrame(data)
+            numeric_cols = [col for col, dtype in df.schema.items() if dtype.is_numeric()]
+            dim_cols = [
+                col for col, dtype in df.schema.items() 
+                if (dtype == pl.Utf8 or dtype == pl.Categorical) and 1 < df[col].n_unique() < 30
+            ]
+            
+            metrics["dataset_scope"] = {
+                "total_records": len(df),
+                "columns": df.columns,
+                "numeric_metrics": numeric_cols,
+                "categorical_dimensions": dim_cols
+            }
+            
+            # Dynamic date detection
+            date_col = next((col for col, dtype in df.schema.items() if dtype.is_temporal() or "date" in col.lower() or "month" in col.lower()), None)
+            if date_col:
+                try:
+                    metrics["dataset_scope"]["date_range"] = {
+                        "start": str(df[date_col].min()),
+                        "end": str(df[date_col].max())
+                    }
+                except Exception as e:
+                    logger.warning(f"Failed to detect date range: {e}")
+                    pass
+            
+            # Top metric summaries
+            metric_col = next((c for c in numeric_cols if "id" not in c.lower()), None)
+            if metric_col and dim_cols:
+                summaries = {}
+                for col in dim_cols[:3]: # limit to top 3 dimensions
+                    summaries[f"totals_by_{col}"] = (
+                        df.group_by(col)
+                        .agg(pl.col(metric_col).sum())
+                        .sort(metric_col, descending=True)
+                        .head(10)
+                        .to_dicts()
+                    )
+                metrics["primary_metrics_breakdown"] = {
+                    "metric_used": metric_col,
+                    "breakdowns": summaries
+                }
+            
+            # Sample stats for numeric
+            for col in numeric_cols[:5]: # limit to top 5
                 metrics[f"{col}_stats"] = self.calculator.summary_stats(df, col)
+
+        else:
+            return "No data available."
         
         return json.dumps(metrics, indent=2)
 
-    def analyze(self, user_query: str, data_context: List[Dict[str, Any]] = None, session_id: str = "default", filename: str = None) -> AnalysisResponse:
+    def analyze(self, user_query: str, data_context: List[Dict[str, Any]] = None, session_id: str = "default", filename: str = None, dfs: Dict[str, Any] = None) -> AnalysisResponse:
         """
         Orchestrate the analysis by combining RAG, python math, and session history.
         Supports 2-step reasoning via Code Interpreter.
         """
-        from modules.llm.code_interpreter import CodeInterpreter
         interpreter = CodeInterpreter()
         
         # 1. Get Conversation History (Smarter Truncation)
@@ -145,26 +179,33 @@ class AnalystAgent:
             if len(content) > 250:
                 content = content[:250] + "... [TRUNCATED]"
             
-            history_parts.append(f"{role}: {content}")
+            history_parts.append(f"{role.capitalize()}: {content}")
         history_text = "\n".join(history_parts)
         
         # 2. Get RAG context (filtered by filename if provided)
         rag_context = self.retriever.get_context(user_query, top_k=5, filename=filename)
 
         # 3. Get calculated metrics
-        metrics_context = self._prepare_metrics_context(data_context, filename=filename) if data_context else "No table data provided."
+        metrics_context = self._prepare_metrics_context(data_context, filename=filename, dfs=dfs)
         
         # 4. First Pass: Strategic Strategy & Code Generation
-        from datetime import datetime
         current_date_str = datetime.now().strftime("%Y-%m-%d")
         
-        from modules.llm.prompts import QUERY_PROMPT_TEMPLATE
+        # 4. Get Available Files (Detailed Var info)
+        var_info = ""
+        if dfs:
+            var_info = "AVAILABLE DATAFRAMES (USE THESE VARIABLES IN YOUR CODE):\n"
+            for k in dfs.keys():
+                var_info += f"- `{k}`\n"
+        
         prompt = QUERY_PROMPT_TEMPLATE.format(
             history=history_text,
             calculated_metrics=metrics_context,
             rag_context=rag_context,
             user_question=user_query,
-            current_date=current_date_str
+            current_date=current_date_str,
+            filename=filename or "Unknown Dataset",
+            available_files=var_info or "No specific dataframes active."
         )
         
         try:
@@ -188,10 +229,12 @@ class AnalystAgent:
             python_code = initial_parsed.get("python_code")
             
             # Step 2: Execution if needed
-            if python_code and data_context:
-                import polars as pl
-                df = pl.DataFrame(data_context)
-                exec_result = interpreter.execute(python_code, df)
+            if python_code and (data_context or dfs):
+                if dfs:
+                    exec_result = interpreter.execute(python_code, dfs=dfs)
+                else:
+                    df = pl.DataFrame(data_context)
+                    exec_result = interpreter.execute(python_code, df=df)
                 
                 # Step 3: Refinement with results
                 refinement_prompt = f"""
@@ -202,6 +245,8 @@ class AnalystAgent:
                 
                 ACTION: Provide your FINAL Strategic Intelligence answer based on the results above.
                 - Your response MUST be valid JSON.
+                - **RESILIENT ADVISOR**: If there was an ERROR in the code, do NOT just say "I cannot display data". Instead, use your existing knowledge of the dataset (from the first turn) to provide the best possible strategic advice while clearly acknowledging you couldn't calculate the latest figures.
+                - **STRICT VERACITY**: If a value could not be calculated due to an error, DO NOT use descriptive text placeholders in `table_data` or `charts`. Use "Error" or null.
                 - The 'answer' field MUST NOT be empty. Synthesize the results into professional Thai insights.
                 - If the results provide enough data for a table, include it in 'table_data'.
                 """
@@ -213,7 +258,6 @@ class AnalystAgent:
                 raw_content = final_response.choices[0].message.content
                 logger.info("Successfully received LLM analysis after code execution")
 
-            from modules.llm.output_parser import OutputParser
             parsed_response = OutputParser.parse_analysis(raw_content, rag_context=rag_context)
             if python_code:
                 parsed_response.python_code = python_code

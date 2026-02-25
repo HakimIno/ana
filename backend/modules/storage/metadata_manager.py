@@ -44,13 +44,46 @@ class MetadataManager:
         except Exception as e:
             logger.error(f"Error saving metadata for {filename}: {e}")
 
+    def get_group(self, filename: str) -> Optional[str]:
+        """Retrieves the group/category for a file."""
+        path = self._get_metadata_path(filename)
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f).get("group")
+        except Exception as e:
+            logger.error(f"Error reading group for {filename}: {e}")
+            return None
+
+    def save_group(self, filename: str, group: str):
+        """Saves a group/category for a file."""
+        path = self._get_metadata_path(filename)
+        try:
+            metadata = {}
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    metadata = json.load(f)
+            
+            metadata["group"] = group
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+            logger.info(f"Saved group '{group}' for {filename}")
+        except Exception as e:
+            logger.error(f"Error saving group for {filename}: {e}")
+
     def generate_default_dictionary(self, filename: str, columns: List[str]):
-        """Generates a default business dictionary based on common column naming patterns."""
+        """Generates a default business dictionary and assigns a default group based on prefix."""
         mapping = {}
         for col in columns:
-            # Simple heuristic mapping
             clean = col.replace("_", " ").title()
             mapping[col] = clean
             
         self.save_dictionary(filename, mapping)
+        
+        # Auto-detect group from filename prefix (e.g. "shabu_")
+        if "_" in filename:
+            prefix = filename.split("_")[0].title()
+            self.save_group(filename, prefix)
+            
         return mapping

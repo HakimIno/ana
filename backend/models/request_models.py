@@ -6,6 +6,8 @@ class QueryRequest(BaseModel):
     question: str
     session_id: Optional[str] = "default"
     filename: Optional[str] = None
+    filenames: Optional[List[str]] = None
+    group: Optional[str] = None
     # Optional parameters for advanced filtering
     filters: Optional[Dict[str, Any]] = None
 

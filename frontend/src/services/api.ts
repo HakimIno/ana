@@ -16,10 +16,12 @@ export const chatService = {
         return response.data;
     },
 
-    postQuery: async (question: string, filename?: string, sessionId: string = "default"): Promise<QueryResponse> => {
+    postQuery: async (question: string, filename?: string, sessionId: string = "default", group?: string, filenames?: string[]): Promise<QueryResponse> => {
         const response = await api.post<QueryResponse>("/query", {
             question,
             filename,
+            filenames,
+            group,
             session_id: sessionId
         });
         return response.data;

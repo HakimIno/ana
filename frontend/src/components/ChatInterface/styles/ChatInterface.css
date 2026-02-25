@@ -450,3 +450,24 @@ details.code-execution-block[open] .code-header {
   justify-content: center;
   align-items: center;
 }
+
+.token-usage-footer {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  justify-content: flex-start;
+}
+
+.token-stat {
+  font-size: 10px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.token-icon {
+  color: var(--accent-color);
+}

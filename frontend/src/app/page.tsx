@@ -6,15 +6,27 @@ import FileUpload from "@/components/FileUpload/FileUpload";
 import ChatInterface from "@/components/ChatInterface/ChatInterface";
 
 import Tree5 from "@/components/Tree5";
-import TreeDraw from "@/components/Treedraw";
 import Image from "next/image";
-import { Trash2, Plus, MessageSquare } from "lucide-react";
+import { Trash2, Plus, MessageSquare, ChevronRight, ChevronDown, Folder, FileText } from "lucide-react";
 import { chatService } from "@/services/api";
 
 export default function Home() {
   const queryClient = useQueryClient();
   const [activeFile, setActiveFile] = useState<any>(null);
   const [activeSessionId, setActiveSessionId] = useState<string>("default");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  const toggleGroup = (groupName: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupName)) {
+        next.delete(groupName);
+      } else {
+        next.add(groupName);
+      }
+      return next;
+    });
+  };
 
   // --- Queries ---
   const { data: files = [], refetch: refetchFiles } = useQuery({
@@ -36,7 +48,7 @@ export default function Home() {
   useEffect(() => {
     if (files.length > 0 && !activeFile) {
       const sorted = [...files].sort((a: any, b: any) => b.created_at - a.created_at);
-      setActiveFile(sorted[0]);
+      setActiveFile({ ...sorted[0], type: 'file' });
     }
   }, [files, activeFile]);
 
@@ -115,33 +127,63 @@ export default function Home() {
           </div>
 
           <div className="nav-section scrollable">
-            <span className="section-title">SESSIONS</span>
-            <div className="file-list">
-              {files.map((file: any) => (
-                <div
-                  key={file.filename}
-                  className={`file-info mono ${activeFile?.filename === file.filename ? 'active' : ''}`}
-                  onClick={() => setActiveFile(file)}
-                >
-                  <div className="file-header">
-                    <p className="filename">{file.filename}</p>
-                    <button
-                      className="delete-btn"
-                      onClick={(e) => handleDeleteFile(e, file.filename)}
-                      title="Delete File"
+            <span className="section-title">PROJECTS</span>
+            <div className="accordion-list">
+              {/* Unique Groups */}
+              {Array.from(new Set(files.map((f: any) => f.group).filter(Boolean))).sort().map((groupName: any) => {
+                const isExpanded = expandedGroups.has(groupName);
+                const groupFiles = files.filter((f: any) => f.group === groupName);
+
+                return (
+                  <div key={`group-container-${groupName}`} className="accordion-item">
+                    <div
+                      className={`group-header mono ${activeFile?.type === 'group' && activeFile?.group === groupName ? 'active' : ''}`}
+                      onClick={() => setActiveFile({ type: 'group', group: groupName, filename: `Group: ${groupName}` })}
                     >
-                      <Trash2 size={12} />
-                    </button>
+                      <div className="header-content">
+                        <button
+                          className="expand-toggle"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleGroup(groupName);
+                          }}
+                        >
+                          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        </button>
+                        <Folder size={14} className="folder-icon" />
+                        <span className="group-name">{groupName}</span>
+                      </div>
+                      <span className="badge">{groupFiles.length}</span>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="group-content">
+                        {groupFiles.map((file: any) => (
+                          <div
+                            key={file.filename}
+                            className={`file-item mono ${activeFile?.type === 'file' && activeFile?.filename === file.filename ? 'active' : ''}`}
+                            onClick={() => setActiveFile({ ...file, type: 'file' })}
+                          >
+                            <div className="file-link">
+                              <FileText size={12} className="file-icon" />
+                              <span className="filename">{file.filename}</span>
+                            </div>
+                            <button
+                              className="delete-btn small"
+                              onClick={(e) => handleDeleteFile(e, file.filename)}
+                              title="Delete File"
+                            >
+                              <Trash2 size={10} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="stats">
-                    {file.row_count ? `${file.row_count} rows` : ''}
-                    {file.row_count && file.sheet_name ? ' | ' : ''}
-                    {file.sheet_name || ''}
-                    {!file.row_count && !file.sheet_name ? 'Ready' : ''}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
+
           </div>
 
           <div className="sidebar-animation">
@@ -311,6 +353,15 @@ export default function Home() {
           box-shadow: 0 0 15px rgba(139, 92, 246, 0.1);
         }
 
+        .file-info.group {
+          background: linear-gradient(90deg, rgba(139, 92, 246, 0.05) 0%, transparent 100%);
+        }
+
+        .file-info.group .filename {
+          font-weight: 700;
+          color: var(--accent-color);
+        }
+
         .filename {
           font-size: 13px;
           color: var(--text-primary);
@@ -323,6 +374,157 @@ export default function Home() {
         .stats {
           font-size: 11px;
           color: var(--text-secondary);
+        }
+
+        .accordion-list {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .accordion-item {
+          border-radius: 6px;
+          overflow: hidden;
+          background: rgba(255, 255, 255, 0.02);
+          border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .group-header {
+          padding: 10px 12px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          cursor: pointer;
+          transition: all 0.2s;
+          user-select: none;
+          border-left: 2px solid transparent;
+        }
+
+        .group-header:hover {
+          background: rgba(139, 92, 246, 0.08);
+        }
+
+        .group-header.active {
+          background: rgba(139, 92, 246, 0.1);
+          border-left-color: var(--accent-color);
+        }
+
+        .header-content {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .expand-toggle {
+          background: transparent;
+          border: none;
+          color: var(--text-secondary);
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 4px;
+          border-radius: 4px;
+          transition: all 0.2s;
+        }
+
+        .expand-toggle:hover {
+          background: rgba(255, 255, 255, 0.1);
+          color: var(--accent-color);
+        }
+
+        .folder-icon {
+          color: var(--accent-color);
+          opacity: 0.8;
+        }
+
+        .group-name {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .badge {
+          font-size: 10px;
+          background: rgba(139, 92, 246, 0.2);
+          color: var(--accent-color);
+          padding: 2px 6px;
+          border-radius: 10px;
+          font-weight: 700;
+        }
+
+        .group-content {
+          padding: 4px 0 8px 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          border-left: 1px solid rgba(139, 92, 246, 0.2);
+          margin-left: 18px;
+        }
+
+        .file-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          padding: 8px 12px;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+
+        .file-item:hover {
+          background: rgba(255, 255, 255, 0.05);
+        }
+
+        .file-item.active {
+          color: var(--accent-color);
+          background: rgba(139, 92, 246, 0.05);
+        }
+
+        .file-link {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          overflow: hidden;
+        }
+
+        .file-icon {
+          color: var(--text-secondary);
+          flex-shrink: 0;
+        }
+
+        .file-item.active .file-icon {
+          color: var(--accent-color);
+        }
+
+        .file-item .filename {
+          font-size: 12px;
+          margin-bottom: 0;
+        }
+
+        .delete-btn.small {
+          padding: 2px;
+          opacity: 0;
+        }
+
+        .file-item:hover .delete-btn.small {
+          opacity: 1;
+        }
+
+        .filename-container {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 4px;
+        }
+
+        .empty-state {
+          font-size: 11px;
+          color: #444;
+          text-align: center;
+          padding: 20px 0;
+          border: 1px dashed #222;
+          border-radius: 4px;
         }
 
         .sidebar-animation {
