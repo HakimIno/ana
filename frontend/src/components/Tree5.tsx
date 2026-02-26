@@ -1,5 +1,5 @@
 import { motion, useAnimation } from "framer-motion";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 type AnimationControls = ReturnType<typeof useAnimation>;
 
@@ -172,33 +172,52 @@ export default function FlowerField() {
         useFlowerControls()
     ];
 
+    // Use ref to access controls inside useEffect without adding to deps
+    const controlsRef = useRef(controls);
+    controlsRef.current = controls;
+
     useEffect(() => {
+        let cancelled = false;
+
+        const sleep = (ms: number) =>
+            new Promise<void>(r => {
+                const id = setTimeout(r, ms);
+                // Check cancellation after sleep
+                if (cancelled) clearTimeout(id);
+            });
+
         const loop = async () => {
-            while (true) {
+            while (!cancelled) {
+                const ctrls = controlsRef.current;
                 // Reset all
-                controls.forEach(c => {
+                ctrls.forEach(c => {
                     reset(c.ground); reset(c.stem); reset(c.leafL); reset(c.leafR); reset(c.flower);
                     c.petals.forEach(reset);
                 });
-                await new Promise(r => setTimeout(r, 400));
+                await sleep(400);
+                if (cancelled) break;
 
                 // Draw one by one — each flower starts after previous finishes (~3.2s each)
                 const perFlower = 3.2;
-                controls.forEach((c, i) => drawFlower(c, i * perFlower));
+                ctrls.forEach((c, i) => drawFlower(c, i * perFlower));
 
                 // Wait until all drawn + hold pause
-                const totalDraw = (controls.length * perFlower + 1.2) * 1000;
-                await new Promise(r => setTimeout(r, totalDraw + 2000));
+                const totalDraw = (ctrls.length * perFlower + 1.2) * 1000;
+                await sleep(totalDraw + 2000);
+                if (cancelled) break;
 
                 // Erase in reverse order — last flower first
-                for (let i = controls.length - 1; i >= 0; i--) {
-                    await eraseFlower(controls[i], 0);
+                for (let i = ctrls.length - 1; i >= 0; i--) {
+                    if (cancelled) break;
+                    await eraseFlower(ctrls[i], 0);
                 }
-                await new Promise(r => setTimeout(r, 500));
+                await sleep(500);
             }
         };
         loop();
-    }, [controls]);
+
+        return () => { cancelled = true; };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
         <div style={{

@@ -66,10 +66,11 @@ export default function BrainFlow({ size = 120 }: BrainFlowProps): JSX.Element {
                     </linearGradient>
                 </defs>
 
-                {/* ── 1. Base line — dim static, drawn in on load ── */}
+                {/* ── 1. Base line — dim static ── */}
                 <motion.path
                     d={LINE_PATH}
-                    stroke="rgba(255,255,255,0.18)"
+                    stroke="currentColor"
+                    strokeOpacity={0.12}
                     strokeWidth={14}
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -82,8 +83,9 @@ export default function BrainFlow({ size = 120 }: BrainFlowProps): JSX.Element {
                 {/* ── 2. Brighter inner line ── */}
                 <motion.path
                     d={LINE_PATH}
-                    stroke="rgba(255,255,255,0.55)"
-                    strokeWidth={5}
+                    stroke="currentColor"
+                    strokeOpacity={0.4}
+                    strokeWidth={4}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     fill="none"
@@ -92,53 +94,53 @@ export default function BrainFlow({ size = 120 }: BrainFlowProps): JSX.Element {
                     transition={{ duration: 2.6, ease: [0.4, 0, 0.2, 1], delay: 0.2 }}
                 />
 
-                {/* ── 3. Moving glow pulse — flows along the path ── */}
+                {/* ── 3. Moving glow pulse ── */}
                 <path
                     d={LINE_PATH}
-                    stroke="white"
-                    strokeWidth={10}
-                    strokeLinecap="round"
-                    fill="none"
-                    strokeDasharray="120 3000"
-                    style={{
-                        animation: "flow 3.5s linear infinite",
-                        filter: "url(#glow-white)",
-                        opacity: 0.9,
-                    }}
-                />
-
-                {/* Second pulse offset for continuous feel */}
-                <path
-                    d={LINE_PATH}
-                    stroke="white"
-                    strokeWidth={6}
-                    strokeLinecap="round"
-                    fill="none"
-                    strokeDasharray="60 3000"
-                    style={{
-                        animation: "flow 3.5s linear infinite",
-                        animationDelay: "-1.75s",
-                        filter: "url(#glow-white)",
-                        opacity: 0.6,
-                    }}
-                />
-
-                {/* Terracotta pulse — slower, different rhythm */}
-                <path
-                    d={LINE_PATH}
-                    stroke="#c1705a"
+                    stroke="currentColor"
                     strokeWidth={8}
+                    strokeLinecap="round"
+                    fill="none"
+                    strokeDasharray="140 3000"
+                    style={{
+                        animation: "flow 4s linear infinite",
+                        filter: "blur(4px)", // Simple glow for better theme compatibility
+                        opacity: 0.8,
+                    }}
+                />
+
+                {/* Second pulse ── */}
+                <path
+                    d={LINE_PATH}
+                    stroke="currentColor"
+                    strokeWidth={5}
                     strokeLinecap="round"
                     fill="none"
                     strokeDasharray="80 3000"
                     style={{
-                        animation: "flow 5.5s linear infinite",
+                        animation: "flow 4s linear infinite",
                         animationDelay: "-2s",
+                        filter: "blur(2px)",
+                        opacity: 0.5,
+                    }}
+                />
+
+                {/* Terracotta pulse — slower ── */}
+                <path
+                    d={LINE_PATH}
+                    stroke="#c1705a"
+                    strokeWidth={7}
+                    strokeLinecap="round"
+                    fill="none"
+                    strokeDasharray="100 3000"
+                    style={{
+                        animation: "flow 6s linear infinite",
+                        animationDelay: "-1s",
                         opacity: 0.7,
                     }}
                 />
 
-                {/* ── 4. Terracotta circle — from image ── */}
+                {/* ── 4. Terracotta circle ── */}
                 <motion.circle
                     cx={CIRCLE.cx}
                     cy={CIRCLE.cy}
@@ -146,18 +148,18 @@ export default function BrainFlow({ size = 120 }: BrainFlowProps): JSX.Element {
                     fill="#c1705a"
                     initial={{ scale: 0, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
-                    transition={{ duration: 0.7, delay: 1.0, ease: [0.34, 1.56, 0.64, 1] }}
+                    transition={{ duration: 0.7, delay: 0.8, ease: [0.34, 1.56, 0.64, 1] }}
                     style={{ originX: `${CIRCLE.cx}px`, originY: `${CIRCLE.cy}px` }}
                 />
 
-                {/* Expanding ring from circle */}
+                {/* Expanding rings */}
                 <circle
                     cx={CIRCLE.cx}
                     cy={CIRCLE.cy}
                     r={CIRCLE.r}
                     fill="none"
                     stroke="#c1705a"
-                    style={{ animation: "ringPulse 2.5s ease-out infinite", animationDelay: "1.2s" }}
+                    style={{ animation: "ringPulse 3s ease-out infinite", animationDelay: "1s" }}
                 />
                 <circle
                     cx={CIRCLE.cx}
@@ -165,7 +167,7 @@ export default function BrainFlow({ size = 120 }: BrainFlowProps): JSX.Element {
                     r={CIRCLE.r}
                     fill="none"
                     stroke="#c1705a"
-                    style={{ animation: "ringPulse 2.5s ease-out infinite", animationDelay: "2.45s" }}
+                    style={{ animation: "ringPulse 3s ease-out infinite", animationDelay: "2.5s" }}
                 />
             </svg>
         </div>

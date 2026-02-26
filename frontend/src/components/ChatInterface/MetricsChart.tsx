@@ -1,379 +1,339 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
 import {
-    AreaChart,
-    Area,
-    BarChart,
-    Bar,
-    LineChart,
-    Line,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    ResponsiveContainer
-} from 'recharts';
+    AreaChart, Area,
+    BarChart, Bar, Cell,
+    LineChart, Line,
+    PieChart, Pie,
+    RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+    XAxis, YAxis, CartesianGrid,
+    Tooltip, ResponsiveContainer, Legend,
+} from "recharts";
 
-interface ChartData {
-    label: string;
-    value: number;
-    mom_growth_pct?: number;
+// ─── Palette (evilcharts-style) ─────────────────────────────────────────────
+const COLORS = [
+    "#0d9488", // teal-600
+    "#f97316", // orange-500
+    "#eab308", // yellow-500
+    "#14b8a6", // teal-400
+    "#6366f1", // indigo-500
+    "#ec4899", // pink-500
+    "#3b82f6", // blue-500
+    "#10b981", // emerald-500
+];
+
+// ─── Smart chart-type pick ──────────────────────────────────────────────────
+type ChartKind = "bar" | "area" | "line" | "pie" | "radar";
+
+function pickType(hint: string, data: Datum[]): ChartKind {
+    const t = (hint || "").toLowerCase();
+    if (["pie", "donut", "ring", "proportion"].includes(t)) return "pie";
+    if (["radar", "spider"].includes(t)) return "radar";
+    if (t === "line") return "line";
+    if (["area", "trend"].includes(t)) return "area";
+    if (t === "bar" || t === "column") return "bar";
+
+    const isTime = data.some(d =>
+        /\d{4}[-\/]\d{1,2}/.test(d.label) ||
+        /jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i.test(d.label) ||
+        /q[1-4]/i.test(d.label) ||
+        /ม\.ค|ก\.พ|มี\.ค|เม\.ย|พ\.ค|มิ\.ย|ก\.ค|ส\.ค|ก\.ย|ต\.ค|พ\.ย|ธ\.ค/.test(d.label)
+    );
+    if (isTime) return "area";
+    if (data.length <= 6) return "pie";
+    return "bar";
 }
 
-interface MetricsChartProps {
-    data: ChartData[];
-    title?: string;
-    type?: string;
+// ─── Normalise data ─────────────────────────────────────────────────────────
+interface RawItem { [k: string]: any; }
+interface Datum { label: string; value: number;[k: string]: any; }
+
+function normalise(raw: RawItem[]): Datum[] {
+    if (!raw?.length) return [];
+    return raw.map(item => {
+        const label =
+            item.label ?? item.name ?? item.branch ?? item.category ??
+            item.month ?? item.year ?? item.date ?? item.period ??
+            item.dept ?? item.department ?? item.product ?? item.type ??
+            item.region ?? item.item ??
+            (() => { const k = Object.keys(item).find(k => typeof item[k] === "string"); return k ? item[k] : "—"; })();
+
+        const value =
+            item.value ?? item.count ?? item.total ?? item.revenue ??
+            item.score ?? item.amount ?? item.avg ?? item.average ??
+            item.salary ?? item.sales ?? item.profit ?? item.cost ??
+            (() => { const k = Object.keys(item).find(k => typeof item[k] === "number"); return k ? item[k] : 0; })();
+
+        return { ...item, label: String(label), value: Number(value) };
+    });
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-        return (
-            <div className="custom-tooltip">
-                <p className="tooltip-label">{label}</p>
-                <div className="tooltip-items">
-                    {payload.map((item: any, index: number) => (
-                        <div key={index} className="tooltip-item">
-                            <span className="dot-indicator" style={{ backgroundColor: item.color }}></span>
-                            <span className="item-name">Value:</span>
-                            <span className="item-value">
-                                {item.value >= 1000 ? `${(item.value / 1000).toFixed(1)}k` : item.value.toLocaleString()}
-                            </span>
-                        </div>
-                    ))}
-                </div>
-                <style jsx>{`
-                    .custom-tooltip {
-                        background: rgba(0, 0, 0, 0.9);
-                        backdrop-filter: blur(8px);
-                        border: 1px solid var(--glass-border);
-                        padding: 10px 14px;
-                        border-radius: 8px;
-                        font-family: var(--font-sans);
-                        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-                    }
-                    .tooltip-label {
-                        font-size: 13px;
-                        font-weight: 600;
-                        color: #fff;
-                        margin-bottom: 8px;
-                    }
-                    .tooltip-items {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 6px;
-                    }
-                    .tooltip-item {
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                        font-size: 13px;
-                    }
-                    .dot-indicator {
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 50%;
-                    }
-                    .item-name {
-                        color: var(--text-secondary);
-                    }
-                    .item-value {
-                        color: #fff;
-                        font-weight: 600;
-                        margin-left: auto;
-                    }
-                `}</style>
+// ─── Helpers ────────────────────────────────────────────────────────────────
+const fmt = (v: number) =>
+    v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M`
+        : v >= 1000 ? `${(v / 1000).toFixed(1)}k`
+            : v.toLocaleString();
+
+const truncLabel = (s: string, max = 14) =>
+    s.length > max ? s.slice(0, max) + "…" : s;
+
+// ─── Dot grid ───────────────────────────────────────────────────────────────
+const DotGrid = ({ id }: { id: string }) => (
+    <defs>
+        <pattern id={id} x={0} y={0} width={16} height={16} patternUnits="userSpaceOnUse">
+            <circle cx={8} cy={8} r={0.7} fill="rgba(0,0,0,0.05)" />
+        </pattern>
+    </defs>
+);
+
+// ─── Tooltip ────────────────────────────────────────────────────────────────
+const Tip = ({ active, payload, label }: any) => {
+    if (!active || !payload?.length) return null;
+    return (
+        <div style={{
+            background: "#fff",
+            border: "1px solid rgba(0,0,0,0.06)",
+            borderRadius: 10,
+            padding: "8px 14px",
+            boxShadow: "0 4px 14px rgba(0,0,0,0.06)",
+            fontSize: 13,
+            fontFamily: "var(--font-sans, sans-serif)",
+        }}>
+            <div style={{ color: "#aaa", fontWeight: 600, marginBottom: 3, fontSize: 10 }}>
+                {label || payload[0]?.payload?.label}
             </div>
-        );
-    }
-    return null;
+            {payload.map((p: any, i: number) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 1 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: p.fill || p.stroke || p.color, display: "inline-block" }} />
+                    <span style={{ color: "#222", fontWeight: 700 }}>{fmt(p.value)}</span>
+                </div>
+            ))}
+        </div>
+    );
 };
 
-export default function MetricsChart({ data, title, type = 'area' }: MetricsChartProps) {
-    const [selectedYear, setSelectedYear] = useState<string>("ALL");
+// ─── Axis / Grid ────────────────────────────────────────────────────────────
+const axisX = { fill: "#bbb", fontSize: 10, fontWeight: 500 };
+const axisY = { fill: "#bbb", fontSize: 10 };
+const gridClr = "rgba(0,0,0,0.04)";
 
-    const years = useMemo(() => {
-        const uniqueYears = new Set<string>();
-        data.forEach(item => {
-            const yearMatch = item.label.match(/\d{4}/);
-            if (yearMatch) uniqueYears.add(yearMatch[0]);
-        });
-        const sorted = Array.from(uniqueYears).sort().reverse();
-        return ["ALL", ...sorted];
-    }, [data]);
+// ─── Pie label renderer (value on slice) ────────────────────────────────────
+const RADIAN = Math.PI / 180;
+const renderPieLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, value }: any) => {
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.55;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return (
+        <text
+            x={x} y={y}
+            fill="#fff"
+            textAnchor="middle"
+            dominantBaseline="central"
+            style={{ fontSize: 12, fontWeight: 700, textShadow: "0 1px 3px rgba(0,0,0,0.3)" }}
+        >
+            {fmt(value)}
+        </text>
+    );
+};
 
-    const filteredData = useMemo(() => {
-        if (selectedYear === "ALL") return data;
-        return data.filter(item => item.label.includes(selectedYear));
-    }, [data, selectedYear]);
+// ─── Chart Sub-Components (top-level to avoid remount) ─────────────────────
+interface ChartSubProps { data: Datum[]; pid: string; animate: boolean; }
 
-    if (!data || data.length === 0) return null;
+function BarC({ data, pid, animate }: ChartSubProps) {
+    return (
+        <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 2 }} barCategoryGap="28%">
+                <DotGrid id={pid} />
+                <rect width="100%" height="100%" fill={`url(#${pid})`} />
+                <CartesianGrid vertical={false} stroke={gridClr} />
+                <XAxis
+                    dataKey="label" axisLine={false} tickLine={false}
+                    tick={axisX} dy={6}
+                    tickFormatter={(v: string) => truncLabel(v)}
+                    interval={data.length > 12 ? Math.ceil(data.length / 8) : 0}
+                />
+                <YAxis axisLine={false} tickLine={false} tick={axisY} tickFormatter={fmt} width={40} />
+                <Tooltip content={<Tip />} cursor={{ fill: "rgba(0,0,0,0.02)" }} />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]} isAnimationActive={animate} animationDuration={700}>
+                    {data.map((_, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    ))}
+                </Bar>
+            </BarChart>
+        </ResponsiveContainer>
+    );
+}
 
-    // Handle single data point elegantly
-    if (data.length === 1) {
-        const item = data[0];
-        return (
-            <div className="metrics-single-highlight glass-panel">
-                <div className="highlight-content">
-                    <span className="highlight-label">{item.label}</span>
-                    <span className="highlight-value">
-                        {item.value >= 1000 ? `${(item.value / 1000).toFixed(2)}k` : item.value.toLocaleString()}
-                    </span>
-                    <span className="highlight-status">SINGLE_POINT_DETECTION</span>
-                </div>
-                <style jsx>{`
-                    .metrics-single-highlight {
-                        padding: 24px;
-                        margin-top: 12px;
-                        display: flex;
-                        justify-content: center;
-                        border-left: 4px solid var(--accent-color);
-                    }
-                    .highlight-content {
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        gap: 4px;
-                    }
-                    .highlight-label {
-                        font-family: var(--font-mono);
-                        font-size: 11px;
-                        color: var(--text-secondary);
-                        text-transform: uppercase;
-                        letter-spacing: 0.1em;
-                    }
-                    .highlight-value {
-                        font-family: var(--font-mono);
-                        font-size: 36px;
-                        font-weight: 700;
-                        color: var(--accent-color);
-                        text-shadow: 0 0 20px var(--accent-glow);
-                    }
-                    .highlight-status {
-                        font-family: var(--font-mono);
-                        font-size: 9px;
-                        color: var(--terminal-green);
-                        opacity: 0.8;
-                    }
-                `}</style>
-            </div>
-        );
-    }
+function AreaC({ data, pid, animate }: ChartSubProps) {
+    const c = COLORS[0];
+    const gid = `${pid}-ag`;
+    return (
+        <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 2 }}>
+                <defs>
+                    <DotGrid id={pid} />
+                    <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={c} stopOpacity={0.12} />
+                        <stop offset="100%" stopColor={c} stopOpacity={0} />
+                    </linearGradient>
+                </defs>
+                <rect width="100%" height="100%" fill={`url(#${pid})`} />
+                <CartesianGrid vertical={false} stroke={gridClr} />
+                <XAxis
+                    dataKey="label" axisLine={false} tickLine={false}
+                    tick={axisX} dy={6}
+                    tickFormatter={(v: string) => truncLabel(v)}
+                    interval={data.length > 12 ? Math.ceil(data.length / 8) : 0}
+                />
+                <YAxis axisLine={false} tickLine={false} tick={axisY} tickFormatter={fmt} width={40} />
+                <Tooltip content={<Tip />} />
+                <Area
+                    type="monotone" dataKey="value"
+                    stroke={c} strokeWidth={2}
+                    fill={`url(#${gid})`}
+                    dot={false}
+                    activeDot={{ r: 4, fill: c, stroke: "#fff", strokeWidth: 2 }}
+                    isAnimationActive={animate} animationDuration={800}
+                />
+            </AreaChart>
+        </ResponsiveContainer>
+    );
+}
 
-    const renderChart = () => {
-        switch (type.toLowerCase()) {
-            case 'bar':
-                return (
-                    <BarChart data={filteredData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="rgba(255,255,255,0.03)" />
-                        <XAxis
-                            dataKey="label"
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-                            dy={10}
-                        />
-                        <YAxis
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-                            tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value}
-                            domain={['auto', 'auto']}
-                            padding={{ top: 20, bottom: 10 }}
-                        />
-                        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-                        <Bar
-                            dataKey="value"
-                            fill="var(--accent-color)"
-                            radius={[4, 4, 0, 0]}
-                            animationDuration={1500}
-                        />
-                    </BarChart>
-                );
-            case 'line':
-                return (
-                    <LineChart data={filteredData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="rgba(255,255,255,0.03)" />
-                        <XAxis
-                            dataKey="label"
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-                            dy={10}
-                        />
-                        <YAxis
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-                            tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value}
-                            domain={['auto', 'auto']}
-                            padding={{ top: 20, bottom: 10 }}
-                        />
-                        <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'var(--border-color)', strokeWidth: 1 }} />
-                        <Line
-                            type="monotone"
-                            dataKey="value"
-                            stroke="var(--accent-color)"
-                            strokeWidth={3}
-                            dot={{ r: 4, fill: "var(--accent-color)", strokeWidth: 0 }}
-                            activeDot={{ r: 6, stroke: "#fff", strokeWidth: 2 }}
-                            animationDuration={1500}
-                        />
-                    </LineChart>
-                );
-            case 'area':
-            default:
-                return (
-                    <AreaChart data={filteredData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
-                        <defs>
-                            <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="var(--accent-color)" stopOpacity={0.3} />
-                                <stop offset="95%" stopColor="var(--accent-color)" stopOpacity={0} />
-                            </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="rgba(255,255,255,0.03)" />
-                        <XAxis
-                            dataKey="label"
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-                            dy={10}
-                        />
-                        <YAxis
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fill: 'var(--text-secondary)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-                            tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(1)}k` : value}
-                            domain={['auto', 'auto']}
-                            padding={{ top: 20, bottom: 10 }}
-                        />
-                        <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'var(--border-color)', strokeWidth: 1 }} />
-                        <Area
-                            type="monotone"
-                            dataKey="value"
-                            stroke="var(--accent-color)"
-                            strokeWidth={3}
-                            fill="url(#chartGradient)"
-                            activeDot={{ r: 5, fill: "var(--accent-color)", stroke: "#fff", strokeWidth: 2 }}
-                            animationDuration={1500}
-                        />
-                    </AreaChart>
-                );
+function LineC({ data, pid, animate }: ChartSubProps) {
+    const c = COLORS[4]; // indigo
+    return (
+        <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 2 }}>
+                <DotGrid id={pid} />
+                <rect width="100%" height="100%" fill={`url(#${pid})`} />
+                <CartesianGrid vertical={false} stroke={gridClr} />
+                <XAxis
+                    dataKey="label" axisLine={false} tickLine={false}
+                    tick={axisX} dy={6}
+                    tickFormatter={(v: string) => truncLabel(v)}
+                    interval={data.length > 12 ? Math.ceil(data.length / 8) : 0}
+                />
+                <YAxis axisLine={false} tickLine={false} tick={axisY} tickFormatter={fmt} width={40} />
+                <Tooltip content={<Tip />} />
+                <Line
+                    type="monotone" dataKey="value"
+                    stroke={c} strokeWidth={2}
+                    dot={{ r: 3, fill: "#fff", stroke: c, strokeWidth: 1.5 }}
+                    activeDot={{ r: 5, fill: c, stroke: "#fff", strokeWidth: 2 }}
+                    isAnimationActive={animate} animationDuration={800}
+                />
+            </LineChart>
+        </ResponsiveContainer>
+    );
+}
+
+function PieC({ data, animate }: Omit<ChartSubProps, 'pid'>) {
+    return (
+        <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+                <Pie
+                    data={data} cx="50%" cy="48%"
+                    innerRadius={0} outerRadius={100}
+                    dataKey="value" nameKey="label"
+                    paddingAngle={2}
+                    cornerRadius={4}
+                    isAnimationActive={animate} animationDuration={700}
+                    stroke="#fff"
+                    strokeWidth={3}
+                    label={renderPieLabel}
+                    labelLine={false}
+                >
+                    {data.map((_, i) => (
+                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    ))}
+                </Pie>
+                <Tooltip content={<Tip />} />
+                <Legend
+                    iconType="circle" iconSize={8}
+                    wrapperStyle={{ paddingTop: 8 }}
+                    formatter={(v: any) => (
+                        <span style={{ color: "#555", fontSize: 11, fontWeight: 500 }}>{v}</span>
+                    )}
+                />
+            </PieChart>
+        </ResponsiveContainer>
+    );
+}
+
+function RadarC({ data, animate }: Omit<ChartSubProps, 'pid'>) {
+    const c = COLORS[0]; // teal
+    return (
+        <ResponsiveContainer width="100%" height={240}>
+            <RadarChart data={data} margin={{ top: 8, right: 24, bottom: 8, left: 24 }}>
+                <PolarGrid stroke="rgba(0,0,0,0.06)" />
+                <PolarAngleAxis dataKey="label" tick={{ fill: "#888", fontSize: 10, fontWeight: 500 }} />
+                <PolarRadiusAxis tick={false} axisLine={false} />
+                <Radar
+                    dataKey="value"
+                    fill={c} fillOpacity={0.12}
+                    stroke={c} strokeWidth={2}
+                    isAnimationActive={animate} animationDuration={800}
+                />
+                <Tooltip content={<Tip />} />
+            </RadarChart>
+        </ResponsiveContainer>
+    );
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+interface Props { data: RawItem[]; title?: string; type?: string; }
+
+export default function MetricsChart({ data: raw, title, type = "bar" }: Props) {
+    const data = useMemo(() => normalise(raw), [raw]);
+    const kind = useMemo(() => pickType(type, data), [type, data]);
+
+    // Animate once on mount only
+    const mounted = useRef(false);
+    const [animate, setAnimate] = useState(true);
+    useEffect(() => {
+        if (!mounted.current) {
+            mounted.current = true;
+            const t = setTimeout(() => setAnimate(false), 1200);
+            return () => clearTimeout(t);
         }
-    };
+    }, []);
 
-    // Calculate dynamic width for scrolling if data is dense
-    // Reduced multiplier from 40 to 6 to bring points closer together
-    const chartMinWidth = Math.max(100, filteredData.length * 6);
+    if (!data.length) return null;
+
+    const pid = useMemo(() => `p${Math.random().toString(36).slice(2, 7)}`, []);
+
+    // ═══════════════════════════════════════════════════════════════════════
+    const chart = (() => {
+        switch (kind) {
+            case "area": return <AreaC data={data} pid={pid} animate={animate} />;
+            case "line": return <LineC data={data} pid={pid} animate={animate} />;
+            case "pie": return <PieC data={data} animate={animate} />;
+            case "radar": return <RadarC data={data} animate={animate} />;
+            default: return <BarC data={data} pid={pid} animate={animate} />;
+        }
+    })();
 
     return (
-        <div className="metrics-chart-container glass-panel">
-            <div className="chart-header">
-                {title && <h4 className="chart-title">{title}</h4>}
-
-                {years.length > 2 && (
-                    <div className="year-selector">
-                        {years.map(year => (
-                            <button
-                                key={year}
-                                className={`year-btn ${selectedYear === year ? 'active' : ''}`}
-                                onClick={() => setSelectedYear(year)}
-                            >
-                                {year}
-                            </button>
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            <div className="scroll-wrapper">
-                <div style={{ width: `${chartMinWidth}%`, height: 220, minWidth: '100%' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                        {renderChart()}
-                    </ResponsiveContainer>
-                </div>
-            </div>
-
-            <style jsx>{`
-                .metrics-chart-container {
-                    padding: 14px;
-                    margin: 8px 0;
-                    border-radius: 12px;
-                    background: rgba(255, 255, 255, 0.02);
-                }
-
-                .chart-header {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 12px;
-                    gap: 16px;
-                    flex-wrap: wrap;
-                }
-
-                .chart-title {
-                    font-family: var(--font-mono);
-                    font-size: 11px;
-                    font-weight: 700;
-                    color: var(--text-primary);
-                    letter-spacing: 0.1em;
-                    text-transform: uppercase;
-                    margin: 0;
-                }
-
-                .year-selector {
-                    display: flex;
-                    gap: 6px;
-                    background: rgba(255, 255, 255, 0.05);
-                    padding: 3px;
-                    border-radius: 8px;
-                    border: 1px solid var(--border-color);
-                }
-
-                .year-btn {
-                    background: transparent;
-                    border: none;
-                    color: var(--text-secondary);
-                    font-family: var(--font-mono);
-                    font-size: 10px;
-                    padding: 4px 10px;
-                    cursor: pointer;
-                    border-radius: 6px;
-                    transition: all 0.2s;
-                }
-
-                .year-btn:hover {
-                    color: var(--text-primary);
-                    background: rgba(255, 255, 255, 0.05);
-                }
-
-                .year-btn.active {
-                    background: var(--accent-color);
-                    color: white;
-                    box-shadow: 0 0 12px var(--accent-glow);
-                }
-
-                .scroll-wrapper {
-                    overflow-x: auto;
-                    overflow-y: hidden;
-                    width: 100%;
-                    padding-bottom: 10px;
-                }
-
-                .scroll-wrapper::-webkit-scrollbar {
-                    height: 4px;
-                }
-
-                .scroll-wrapper::-webkit-scrollbar-thumb {
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 10px;
-                }
-
-                .scroll-wrapper::-webkit-scrollbar-thumb:hover {
-                    background: var(--accent-color);
-                }
-            `}</style>
+        <div style={{
+            background: "#fff",
+            border: "1px solid rgba(0,0,0,0.07)",
+            borderRadius: 14,
+            padding: "20px 18px 10px",
+        }}>
+            {title && (
+                <h3 style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "#222",
+                    margin: "0 0 4px 0",
+                    fontFamily: "var(--font-sans, sans-serif)",
+                }}>
+                    {title}
+                </h3>
+            )}
+            {chart}
         </div>
     );
 }

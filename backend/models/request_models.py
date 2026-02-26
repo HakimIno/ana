@@ -8,6 +8,7 @@ class QueryRequest(BaseModel):
     filename: Optional[str] = None
     filenames: Optional[List[str]] = None
     group: Optional[str] = None
+    model: Optional[str] = None  # e.g. "gpt-4o", "gemini-2.0-flash"
     # Optional parameters for advanced filtering
     filters: Optional[Dict[str, Any]] = None
 

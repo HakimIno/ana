@@ -1,7 +1,6 @@
 import httpx
 import pytest
 import uuid
-import asyncio
 
 BASE_URL = "http://127.0.0.1:8000"
 

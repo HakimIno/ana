@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # API Keys
     OPENAI_API_KEY: Optional[str] = None
     ZAI_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
     
     # Model Settings
     CHAT_PROVIDER: str = "openai"       # options: "openai", "zai"
@@ -19,7 +20,8 @@ class Settings(BaseSettings):
     
     OPENAI_MODEL: str = "gpt-4o"
     GLM_MODEL: str = "glm-5"
-    
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     ZAI_EMBEDDING_MODEL: str = "embedding-3"
     
