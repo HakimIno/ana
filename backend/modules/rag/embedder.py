@@ -12,21 +12,30 @@ class Embedder:
     """Wrapper for embeddings with batch processing support (OpenAI or Z.AI)."""
     
     _sparse_model = None
+    _dense_model = None
     _sparse_lock = multiprocessing.Lock()
+    _dense_lock = multiprocessing.Lock()
 
     def __init__(self, client: Any = None, provider: str = settings.EMBEDDING_PROVIDER):
         self.provider = provider
-        if client:
-            self.client = client
-        else:
-            if provider == "zai":
-                logger.info(f"Using Z.AI embeddings with model {settings.ZAI_EMBEDDING_MODEL}")
-                self.client = ZaiClient(api_key=settings.ZAI_API_KEY)
-            else:
-                logger.info(f"Using OpenAI embeddings with model {settings.OPENAI_EMBEDDING_MODEL}")
-                self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        self.client = None
         
-        self.model = settings.ZAI_EMBEDDING_MODEL if provider == "zai" else settings.OPENAI_EMBEDDING_MODEL
+        if provider == "zai":
+            logger.info(f"Using Z.AI embeddings with model {settings.ZAI_EMBEDDING_MODEL}")
+            self.client = client if client else ZaiClient(api_key=settings.ZAI_API_KEY)
+            self.model = settings.ZAI_EMBEDDING_MODEL
+        elif provider == "openai":
+            logger.info(f"Using OpenAI embeddings with model {settings.OPENAI_EMBEDDING_MODEL}")
+            self.client = client if client else OpenAI(api_key=settings.OPENAI_API_KEY)
+            self.model = settings.OPENAI_EMBEDDING_MODEL
+        else:
+            logger.info("Using local embeddings with FastEmbed (BAAI/bge-small-en-v1.5)")
+            if Embedder._dense_model is None:
+                with Embedder._dense_lock:
+                    if Embedder._dense_model is None:
+                        from fastembed import TextEmbedding
+                        Embedder._dense_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+            self.dense_model = Embedder._dense_model
         
         # Initialize Sparse Encoder for Hybrid Search as a Singleton
         if Embedder._sparse_model is None:
@@ -47,6 +56,11 @@ class Embedder:
             return []
         
         try:
+            if self.provider == "local":
+                # Returns a generator of numpy arrays
+                embeddings = list(self.dense_model.embed(texts))
+                return [emb.tolist() for emb in embeddings]
+            
             response = self.client.embeddings.create(
                 input=texts,
                 model=self.model

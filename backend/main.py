@@ -63,9 +63,20 @@ def get_llm_client():
     return OpenAI(api_key=settings.OPENAI_API_KEY)
 
 def get_llm_client_for_model(model: Optional[str]):
-    """Return (client, model_name) for a given model ID. Supports OpenAI and Gemini."""
+    """Return (client, model_name) for a given model ID. Supports OpenAI, Gemini, and OpenRouter."""
     if not model:
         return get_llm_client(), settings.OPENAI_MODEL
+
+    # OpenRouter models
+    if model.startswith("openrouter/"):
+        if not settings.OPENROUTER_API_KEY:
+            raise HTTPException(status_code=400, detail="OPENROUTER_API_KEY not configured")
+        actual_model = model.replace("openrouter/", "")
+        client = OpenAI(
+            api_key=settings.OPENROUTER_API_KEY,
+            base_url="https://openrouter.ai/api/v1",
+        )
+        return client, actual_model
 
     gemini_models = {"gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"}
     if model in gemini_models:
@@ -75,7 +86,8 @@ def get_llm_client_for_model(model: Optional[str]):
             api_key=settings.GEMINI_API_KEY,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
         )
-        return client, model
+        # OpenAI-compatible endpoint for Google usually expects the models/ prefix
+        return client, f"models/{model}"
 
     # OpenAI models (gpt-4o, gpt-4o-mini, etc.)
     return OpenAI(api_key=settings.OPENAI_API_KEY), model
@@ -124,11 +136,32 @@ async def list_models():
             "enabled": bool(settings.GEMINI_API_KEY),
         },
         {
-            "id": "gemini-1.5-pro",
-            "label": "Gemini 1.5 Pro",
-            "provider": "gemini",
-            "cost": "Free tier",
-            "enabled": bool(settings.GEMINI_API_KEY),
+            "id": "openrouter/anthropic/claude-3.5-sonnet",
+            "label": "Claude 3.5 Sonnet",
+            "provider": "openrouter",
+            "cost": "$$$",
+            "enabled": bool(settings.OPENROUTER_API_KEY),
+        },
+        {
+            "id": "openrouter/deepseek/deepseek-chat",
+            "label": "DeepSeek V3",
+            "provider": "openrouter",
+            "cost": "$",
+            "enabled": bool(settings.OPENROUTER_API_KEY),
+        },
+        {
+            "id": "openrouter/google/gemini-pro-1.5",
+            "label": "Gemini 1.5 Pro (via OR)",
+            "provider": "openrouter",
+            "cost": "$$",
+            "enabled": bool(settings.OPENROUTER_API_KEY),
+        },
+        {
+            "id": "openrouter/meta-llama/llama-3.1-405b-instruct",
+            "label": "Llama 3.1 405B",
+            "provider": "openrouter",
+            "cost": "$$$",
+            "enabled": bool(settings.OPENROUTER_API_KEY),
         },
     ]
     return [m for m in models if m["enabled"]]
@@ -224,13 +257,21 @@ async def query_analyst(request: QueryRequest, agent: AnalystAgent = Depends(get
             
             data_context = None # We will use dfs in the agent
 
-        return agent.analyze(
+        # 3. Choose agent and model
+        if request.model and request.model != settings.OPENAI_MODEL:
+            client, model_name = get_llm_client_for_model(request.model)
+            active_agent = AnalystAgent(client=client, model_name=model_name)
+        else:
+            active_agent = agent
+            model_name = request.model
+
+        return active_agent.analyze(
             request.question, 
             data_context=data_context, 
             session_id=request.session_id or "default",
             filename=", ".join(target_filenames) if target_filenames else "None",
             dfs=dfs if target_filenames else None,
-            model_name=request.model,
+            model_name=model_name,
         )
     except Exception as e:
         logger.error(f"Query failed: {e}")

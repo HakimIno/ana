@@ -128,7 +128,7 @@ class AnalystAgent:
         for dim in dim_cols:
             try:
                 vals = df[dim].unique().sort().to_list()
-                dimension_values[dim] = vals if len(vals) <= 20 else vals[:15] + [f"... and {len(vals) - 15} more"]
+                dimension_values[dim] = vals if len(vals) <= 60 else vals[:50] + [f"... and {len(vals) - 50} more"]
             except Exception:
                 pass
         if dimension_values:
@@ -222,7 +222,7 @@ class AnalystAgent:
                 for col in dim_cols[:3]:
                     breakdowns[f"totals_by_{col}"] = (
                         df.group_by(col).agg(pl.col(metric_col).sum())
-                        .sort(metric_col, descending=True).head(10).to_dicts()
+                        .sort(metric_col, descending=True).head(40).to_dicts()
                     )
                 scope["primary_metrics_breakdown"] = {"metric_used": metric_col, "breakdowns": breakdowns}
 

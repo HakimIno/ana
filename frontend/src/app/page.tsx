@@ -20,10 +20,7 @@ export default function Home() {
   const [activeSessionId, setActiveSessionId] = useState<string>("default");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [selectedModel, setSelectedModel] = useState<string>(() => {
-    if (typeof window !== "undefined") return localStorage.getItem("selectedModel") || "gpt-4o";
-    return "gpt-4o";
-  });
+  const [selectedModel, setSelectedModel] = useState<string>("gpt-4o");
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const modelMenuRef = useRef<HTMLDivElement>(null);
 
@@ -33,8 +30,15 @@ export default function Home() {
         setModelMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("click", handler);
+    return () => document.removeEventListener("click", handler);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("selectedModel");
+      if (saved) setSelectedModel(saved);
+    }
   }, []);
 
   const toggleGroup = (groupName: string) => {

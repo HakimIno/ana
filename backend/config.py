@@ -13,10 +13,11 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     ZAI_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
+    OPENROUTER_API_KEY: Optional[str] = None
     
     # Model Settings
     CHAT_PROVIDER: str = "openai"       # options: "openai", "zai"
-    EMBEDDING_PROVIDER: str = "openai" # options: "openai", "zai"
+    EMBEDDING_PROVIDER: str = "local" # options: "openai", "zai", "local"
     
     OPENAI_MODEL: str = "gpt-4o"
     GLM_MODEL: str = "glm-5"
