@@ -330,7 +330,8 @@ Respond with ONLY the corrected JSON (with fixed `python_code`). Keep all other 
 
         retry_content = self._call_llm(create_params, total_usage)
         try:
-            retry_code = json.loads(retry_content).get("python_code")
+            cleaned_retry = OutputParser.clean_json(retry_content)
+            retry_code = json.loads(cleaned_retry).get("python_code")
             if retry_code:
                 python_code = retry_code
                 exec_result = self.interpreter.execute(retry_code, df=df, dfs=dfs)
@@ -379,7 +380,8 @@ Respond with ONLY the corrected JSON (with fixed `python_code`). Keep all other 
             with Timer() as t_llm1:
                 raw_content = self._call_llm(create_params, total_usage)
             logger.info("llm_turn_1", duration_ms=t_llm1.duration_ms, tokens=total_usage.total_tokens)
-            initial_parsed = json.loads(raw_content)
+            cleaned_initial = OutputParser.clean_json(raw_content)
+            initial_parsed = json.loads(cleaned_initial)
             python_code = initial_parsed.get("python_code")
 
             # 3. Execute code if present
@@ -487,7 +489,8 @@ CRITICAL RULES:
             # Turn 1: Non-streamed (code generation needs full JSON)
             yield StreamHandler._sse_event("status", "Generating analysis strategy...")
             raw_content = self._call_llm(create_params, total_usage)
-            initial_parsed = json.loads(raw_content)
+            cleaned_initial = OutputParser.clean_json(raw_content)
+            initial_parsed = json.loads(cleaned_initial)
             python_code = initial_parsed.get("python_code")
 
             exec_result = None

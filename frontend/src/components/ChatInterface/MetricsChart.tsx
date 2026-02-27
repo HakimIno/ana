@@ -75,7 +75,7 @@ const fmt = (v: number) =>
         : v >= 1000 ? `${(v / 1000).toFixed(1)}k`
             : v.toLocaleString();
 
-const truncLabel = (s: string, max = 14) =>
+const truncLabel = (s: string, max = 25) =>
     s.length > max ? s.slice(0, max) + "…" : s;
 
 // ─── Dot grid ───────────────────────────────────────────────────────────────
@@ -142,16 +142,17 @@ interface ChartSubProps { data: Datum[]; pid: string; animate: boolean; }
 
 function BarC({ data, pid, animate }: ChartSubProps) {
     return (
-        <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 2 }} barCategoryGap="28%">
+        <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 20 }} barCategoryGap="28%">
                 <DotGrid id={pid} />
                 <rect width="100%" height="100%" fill={`url(#${pid})`} />
                 <CartesianGrid vertical={false} stroke={gridClr} />
                 <XAxis
                     dataKey="label" axisLine={false} tickLine={false}
-                    tick={axisX} dy={6}
-                    tickFormatter={(v: string) => truncLabel(v)}
-                    interval={data.length > 12 ? Math.ceil(data.length / 8) : 0}
+                    tick={{ ...axisX, textAnchor: "end" }} angle={-45} dy={6} dx={-6}
+                    tickFormatter={(v: string) => truncLabel(v, 25)}
+                    interval={0}
+                    height={70}
                 />
                 <YAxis axisLine={false} tickLine={false} tick={axisY} tickFormatter={fmt} width={40} />
                 <Tooltip content={<Tip />} cursor={{ fill: "rgba(0,0,0,0.02)" }} />
@@ -169,8 +170,8 @@ function AreaC({ data, pid, animate }: ChartSubProps) {
     const c = COLORS[0];
     const gid = `${pid}-ag`;
     return (
-        <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 2 }}>
+        <ResponsiveContainer width="100%" height={260}>
+            <AreaChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 20 }}>
                 <defs>
                     <DotGrid id={pid} />
                     <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
@@ -182,9 +183,10 @@ function AreaC({ data, pid, animate }: ChartSubProps) {
                 <CartesianGrid vertical={false} stroke={gridClr} />
                 <XAxis
                     dataKey="label" axisLine={false} tickLine={false}
-                    tick={axisX} dy={6}
-                    tickFormatter={(v: string) => truncLabel(v)}
-                    interval={data.length > 12 ? Math.ceil(data.length / 8) : 0}
+                    tick={{ ...axisX, textAnchor: "end" }} angle={-45} dy={6} dx={-6}
+                    tickFormatter={(v: string) => truncLabel(v, 25)}
+                    interval={0}
+                    height={70}
                 />
                 <YAxis axisLine={false} tickLine={false} tick={axisY} tickFormatter={fmt} width={40} />
                 <Tooltip content={<Tip />} />
@@ -204,16 +206,17 @@ function AreaC({ data, pid, animate }: ChartSubProps) {
 function LineC({ data, pid, animate }: ChartSubProps) {
     const c = COLORS[4]; // indigo
     return (
-        <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 2 }}>
+        <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: -6, bottom: 20 }}>
                 <DotGrid id={pid} />
                 <rect width="100%" height="100%" fill={`url(#${pid})`} />
                 <CartesianGrid vertical={false} stroke={gridClr} />
                 <XAxis
                     dataKey="label" axisLine={false} tickLine={false}
-                    tick={axisX} dy={6}
-                    tickFormatter={(v: string) => truncLabel(v)}
-                    interval={data.length > 12 ? Math.ceil(data.length / 8) : 0}
+                    tick={{ ...axisX, textAnchor: "end" }} angle={-45} dy={6} dx={-6}
+                    tickFormatter={(v: string) => truncLabel(v, 25)}
+                    interval={0}
+                    height={70}
                 />
                 <YAxis axisLine={false} tickLine={false} tick={axisY} tickFormatter={fmt} width={40} />
                 <Tooltip content={<Tip />} />

@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, memo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Terminal, Search, Trash2, Send, Loader2, Pin, Paperclip, Maximize2, Minimize2, Check, X, Sparkles, Circle } from "lucide-react";
 import MetricsChart from "./MetricsChart";
 import AnalysisTable from "./AnalysisTable";
@@ -84,7 +85,7 @@ const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
     <MessageBlock role={msg.role}>
       <ContentArea isAI={isAI}>
         <div className="text-payload">
-          <ReactMarkdown>{msg.content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
         </div>
 
         {isAI && msg.data && (

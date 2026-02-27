@@ -78,6 +78,49 @@
   border: 1px solid var(--border-color);
 }
 
+/* ── Markdown Tables ── */
+.text-payload table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 20px 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 14px;
+  font-family: var(--font-sans);
+}
+
+.text-payload th,
+.text-payload td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.text-payload th {
+  font-weight: 700;
+  color: #111;
+  background-color: rgba(0, 0, 0, 0.02);
+  white-space: nowrap;
+}
+
+.text-payload td {
+  color: #333;
+}
+
+.text-payload tr:last-child td {
+  border-bottom: none;
+}
+
+.text-payload tbody tr {
+  transition: background-color 0.2s;
+}
+
+.text-payload tbody tr:hover {
+  background-color: rgba(0, 0, 0, 0.012);
+}
+
 /* ── Data & Metrics ── */
 .pro-chart {
   background: #fff;

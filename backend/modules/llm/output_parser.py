@@ -9,10 +9,29 @@ class OutputParser:
     """Parses and validates LLM's raw JSON responses into AnalysisResponse."""
 
     @staticmethod
+    def clean_json(raw_content: str) -> str:
+        """Extract JSON string from potentially markdown-wrapped text."""
+        if not raw_content:
+            return "{}"
+        cleaned = raw_content.strip()
+        if cleaned.startswith("```"):
+            import re
+            match = re.search(r'```(?:json)?(.*?)```', cleaned, re.DOTALL | re.IGNORECASE)
+            if match:
+                cleaned = match.group(1).strip()
+        if "{" in cleaned and "}" in cleaned:
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and start < end:
+                cleaned = cleaned[start:end+1]
+        return cleaned
+
+    @staticmethod
     def parse_analysis(raw_content: str, rag_context: Optional[str] = None, token_usage: Optional[Any] = None) -> AnalysisResponse:
         """Parse raw JSON string into AnalysisResponse Pydantic model."""
         try:
-            parsed_data = json.loads(raw_content)
+            cleaned_content = OutputParser.clean_json(raw_content)
+            parsed_data = json.loads(cleaned_content)
             
             # Extract charts (unified schema)
             charts = parsed_data.get("charts", [])

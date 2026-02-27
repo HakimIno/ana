@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-4o"
     GLM_MODEL: str = "glm-5"
     GEMINI_MODEL: str = "gemini-2.0-flash"
+    MINIMAX_MODEL: str = "minimax/minimax-m2.5"
 
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     ZAI_EMBEDDING_MODEL: str = "embedding-3"
