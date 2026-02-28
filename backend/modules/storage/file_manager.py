@@ -49,7 +49,7 @@ class FileManager:
     def list_files(self) -> List[Dict[str, Any]]:
         """List all stored files with metadata, excluding internal metadata files."""
         files = []
-        supported_exts = {".csv", ".xlsx", ".xls"}
+        supported_exts = {".csv", ".xlsx", ".xls", ".typ"}
         for file_path in self.storage_dir.iterdir():
             if file_path.is_file() and file_path.suffix.lower() in supported_exts:
                 stats = file_path.stat()

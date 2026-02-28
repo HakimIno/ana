@@ -1,4 +1,5 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, File, UploadFile, BackgroundTasks, HTTPException, Depends
+from fastapi.responses import FileResponse
 from typing import List, Dict, Any
 import structlog
 from api.deps import get_embedding_client
@@ -31,7 +32,10 @@ async def upload_file(
         # 2. Create Job ID
         job_id = tracker.create_job()
         
-        # 3. Start background processing
+        # 3. Start background processing only for data files
+        if file.filename.lower().endswith('.typ'):
+            return {"job_id": job_id, "message": "Template file uploaded successfully"}
+            
         background_tasks.add_task(
             process_file_async, 
             job_id, 
@@ -54,6 +58,18 @@ async def get_upload_status(job_id: str):
     if not status:
         raise HTTPException(status_code=404, detail="Job not found")
     return status
+
+@router.get("/files/download/{filename}")
+async def download_file(filename: str):
+    """Download a file from storage."""
+    file_manager = FileManager()
+    file_path = file_manager.storage_dir / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Optional: ensure that the browser treats it as a download or inline
+    media_type = "application/pdf" if filename.endswith(".pdf") else "application/octet-stream"
+    return FileResponse(path=file_path, filename=filename, media_type=media_type)
 
 @router.get("/files", response_model=List[FileInfo])
 async def list_files():

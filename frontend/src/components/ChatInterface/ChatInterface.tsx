@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, memo, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Terminal, Search, Trash2, Send, Loader2, Pin, Paperclip, Maximize2, Minimize2, Check, X, Sparkles, Circle } from "lucide-react";
+import { Terminal, Search, Trash2, Send, Loader2, Pin, Paperclip, Maximize2, Minimize2, Check, X, Sparkles, Circle, FileDown, FileText } from "lucide-react";
 import MetricsChart from "./MetricsChart";
 import AnalysisTable from "./AnalysisTable";
 import BrainFlow from "../Brainflow";
@@ -18,18 +18,32 @@ interface ChatInterfaceProps {
   sessionId: string;
   onMessageSent: () => void;
   selectedModel?: string;
+  files?: any[];
 }
 
 // --- Styled Components for Arc UI ---
 const ChatWrapper = styled.div`
+  flex: 1;
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
+  overflow: hidden;
   padding: 0 5%;
   max-width: 1100px;
   width: 100%;
   margin: 0 auto;
-  position: relative;
+
+  .output-stream {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 120px;
+    scroll-behavior: smooth;
+    
+    &::-webkit-scrollbar { display: none; }
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
 `;
 
 const MessageBlock = styled.div<{ role: string }>`
@@ -75,7 +89,7 @@ const DataTray = styled.div`
   flex-direction: column;
   gap: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(0,0,0,0.02);
+  border-top: 1px solid rgba(0, 0, 0, 0.02);
 `;
 
 const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
@@ -126,10 +140,31 @@ const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
                 ))}
               </div>
             )}
-          </DataTray>
+
+            {msg.data.generated_file && (() => {
+              const fileUrl = msg.data.generated_file.startsWith('data:')
+                ? msg.data.generated_file
+                : `http://localhost:8000${msg.data.generated_file}`;
+              return (
+                <a
+                  href={fileUrl}
+                  download="report.pdf"
+                  style={{
+                    color: 'oklch(51.1% 0.262 276.966)',
+                    fontSize: 12,
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.opacity = '0.9'}
+                  onMouseOut={(e) => e.currentTarget.style.opacity = '1'}
+                >
+                  <FileDown size={14} />
+                  ดาวน์โหลดรายงาน PDF
+                </a>
+              );
+            })()}
+          </DataTray >
         )}
-      </ContentArea>
-    </MessageBlock>
+      </ContentArea >
+    </MessageBlock >
   );
 });
 
@@ -214,19 +249,119 @@ const ChatInput = memo(({
   activeFile,
   isSending,
   onSend,
-  onClear
+  onClear,
+  onExport,
+  isExporting,
+  files = []
 }: {
   activeFile: any,
   isSending: boolean,
   onSend: (msg: string) => void,
-  onClear: () => void
+  onClear: () => void,
+  onExport: () => void,
+  isExporting: boolean,
+  files?: any[]
 }) => {
   const [input, setInput] = useState("");
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(-1);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Get base files matching query
+  let filteredFiles = files.filter(f =>
+    mentionQuery !== null && f.filename.toLowerCase().includes(mentionQuery.toLowerCase())
+  );
+
+  // If default templates aren't explicitly in the uploaded files, add them as options
+  const defaultTemplates = ["branch_report.typ", "mega_report.typ"];
+  if (mentionQuery !== null) {
+    defaultTemplates.forEach(template => {
+      if (
+        template.includes(mentionQuery.toLowerCase()) &&
+        !filteredFiles.some(f => f.filename === template)
+      ) {
+        filteredFiles.push({ filename: template, isTemplate: true });
+      }
+    });
+  }
+
+  // Also map existing .typ files to mark them as templates
+  const suggestedFiles = filteredFiles.map(f => ({
+    ...f,
+    isTemplate: f.isTemplate || f.filename.endsWith('.typ')
+  })).slice(0, 5); // Max 5 suggestions
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInput(val);
+
+    // Basic regex to find `@` followed by any characters until a space or end of string, right before cursor
+    const cursor = e.target.selectionStart || 0;
+    const textBeforeCursor = val.slice(0, cursor);
+
+    // Look for @ at the end of the string, optionally followed by non-space chars
+    const match = textBeforeCursor.match(/@([^\s]*)$/);
+
+    if (match) {
+      setMentionQuery(match[1]); // match[1] will be "" if just "@" was typed
+      if (mentionQuery === null) {
+        setMentionIndex(0); // Only reset selection if we just opened the menu
+      }
+    } else {
+      setMentionQuery(null);
+    }
+  };
+
+  const insertMention = (filename: string) => {
+    if (!inputRef.current) return;
+    const cursor = inputRef.current.selectionStart || 0;
+    const textBeforeCursor = input.slice(0, cursor);
+    const textAfterCursor = input.slice(cursor);
+
+    // Find the `@` we are completing
+    const match = textBeforeCursor.match(/@([^\s]*)$/);
+    if (match) {
+      const mentionStart = cursor - match[0].length;
+      const newTextBefore = input.slice(0, mentionStart) + `@${filename} `;
+      setInput(newTextBefore + textAfterCursor);
+      // We can't immediately set cursor here syncly, but it's fine
+    }
+    setMentionQuery(null);
+    inputRef.current.focus();
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Handle mention suggestions navigation
+    if (mentionQuery !== null && suggestedFiles.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setMentionIndex(prev => Math.min(prev + 1, suggestedFiles.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setMentionIndex(prev => Math.max(prev - 1, 0));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        if (suggestedFiles[mentionIndex]) {
+          insertMention(suggestedFiles[mentionIndex].filename);
+        } else {
+          insertMention(suggestedFiles[0].filename);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        setMentionQuery(null);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && input.trim() && !isSending) {
       onSend(input);
       setInput("");
+      setMentionQuery(null);
     }
   };
 
@@ -243,17 +378,55 @@ const ChatInput = memo(({
         <Circle size={4} fill={activeFile ? "#000" : "#ddd"} stroke="none" />
         <span>{activeFile ? "Agent active • session_linked" : "Agent standby • select source"}</span>
       </InputMeta>
-      <InputPill>
+      <InputPill style={{ position: 'relative' }}>
+        {/* Mention Dropdown */}
+        {mentionQuery !== null && suggestedFiles.length > 0 && (
+          <div style={{
+            position: 'absolute', bottom: '100%', left: '20px', marginBottom: '8px',
+            background: '#fff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.1)', overflow: 'hidden', padding: '4px',
+            zIndex: 2000, width: '250px'
+          }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#bbb', margin: '4px 8px', textTransform: 'uppercase' }}>ไฟล์ที่อัปโหลดไว้</div>
+            {suggestedFiles.map((f, i) => (
+              <div
+                key={f.filename}
+                style={{
+                  padding: '6px 8px', borderRadius: '8px', fontSize: '12px', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: '6px',
+                  background: i === mentionIndex
+                    ? (f.isTemplate ? 'rgba(168, 85, 247, 0.1)' : '#f0f0f0')
+                    : 'transparent',
+                  color: f.isTemplate ? '#9333ea' : '#333',
+                  fontWeight: i === mentionIndex ? 600 : 400
+                }}
+                onMouseDown={(e) => { e.preventDefault(); insertMention(f.filename); }}
+                onMouseEnter={() => setMentionIndex(i)}
+              >
+                <FileText size={12} color={f.isTemplate ? "#9333ea" : (i === mentionIndex ? "#000" : "#888")} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {f.filename}
+                  {f.isTemplate && <span style={{ fontSize: '9px', marginLeft: '6px', padding: '2px 4px', background: 'rgba(168, 85, 247, 0.15)', borderRadius: '4px', fontWeight: 700 }}>TEMPLATE</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <StyledInput
+          ref={inputRef}
           type="text"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={activeFile ? "Ask ana.arc anything..." : "Please link a data source..."}
+          onChange={handleInputChange}
+          placeholder={activeFile ? "Ask ana.arc anything (type @ for files)..." : "Please link a data source..."}
           disabled={!activeFile || isSending}
           onKeyDown={handleKeyDown}
           autoFocus
         />
         <div style={{ display: 'flex', gap: '4px' }}>
+          <button onClick={onExport} disabled={isExporting} style={{ background: 'transparent', border: 'none', color: '#aaa', padding: '10px', cursor: 'pointer' }} title="Export PDF">
+            {isExporting ? <Loader2 size={16} className="spin" /> : <FileDown size={16} />}
+          </button>
           <button onClick={onClear} style={{ background: 'transparent', border: 'none', color: '#aaa', padding: '10px', cursor: 'pointer' }} title="Reset">
             <Trash2 size={16} />
           </button>
@@ -269,9 +442,10 @@ const ChatInput = memo(({
 
 ChatInput.displayName = "ChatInput";
 
-export default function ChatInterface({ activeFile, sessionId, onMessageSent, selectedModel }: ChatInterfaceProps) {
+export default function ChatInterface({ activeFile, sessionId, onMessageSent, selectedModel, files }: ChatInterfaceProps) {
   const queryClient = useQueryClient();
   const [isSending, setIsSending] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [streamStatus, setStreamStatus] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -351,6 +525,55 @@ export default function ChatInterface({ activeFile, sessionId, onMessageSent, se
     }
   }, [isHistoryLoading, isSending, sessionId, queryClient, onMessageSent]);
 
+  const handleExportPdf = useCallback(async () => {
+    if (messages.length === 0 || isExporting) return;
+
+    setIsExporting(true);
+    try {
+      // Find the latest message that has data
+      const latestDataMsg = [...messages].reverse().find(m => m.data);
+
+      const pydanticMessages = messages.map(m => ({
+        role: m.role === 'ai' ? 'assistant' : m.role,
+        content: m.content
+      }));
+
+      const payload = {
+        title: "Analysis Report",
+        messages: pydanticMessages,
+        analysis_data: latestDataMsg?.data?.table_data || [],
+        metrics: latestDataMsg?.data?.key_metrics || {}
+      };
+
+      const response = await fetch("http://localhost:8000/export/pdf", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error("Export failed");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.style.display = "none";
+      a.href = url;
+      a.download = "analysis_export.pdf";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Error exporting PDF:", error);
+      alert("Failed to export PDF.");
+    } finally {
+      setIsExporting(false);
+    }
+  }, [messages, isExporting]);
+
   return (
     <ChatWrapper>
       <div className="output-stream" ref={scrollRef}>
@@ -378,6 +601,9 @@ export default function ChatInterface({ activeFile, sessionId, onMessageSent, se
         isSending={isSending}
         onSend={handleSend}
         onClear={handleClear}
+        onExport={handleExportPdf}
+        isExporting={isExporting}
+        files={files}
       />
     </ChatWrapper>
   );

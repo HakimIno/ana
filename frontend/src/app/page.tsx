@@ -285,6 +285,7 @@ export default function Home() {
             sessionId={activeSessionId}
             onMessageSent={() => queryClient.invalidateQueries({ queryKey: ["sessions"] })}
             selectedModel={selectedModel}
+            files={files}
           />
         </div>
       </main>

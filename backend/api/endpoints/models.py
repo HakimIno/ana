@@ -43,6 +43,13 @@ async def list_models():
             "enabled": bool(settings.OPENROUTER_API_KEY),
         },
         {
+            "id": "openrouter/deepseek/deepseek-v3.2",
+            "label": "DeepSeek V3.2",
+            "provider": "openrouter",
+            "cost": "$$$",
+            "enabled": bool(settings.OPENROUTER_API_KEY),
+        },
+        {
             "id": "openrouter/google/gemini-pro-1.5",
             "label": "Gemini 1.5 Pro (via OR)",
             "provider": "openrouter",

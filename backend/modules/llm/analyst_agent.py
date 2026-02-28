@@ -365,6 +365,41 @@ Respond with ONLY the corrected JSON (with fixed `python_code`). Keep all other 
 
         # 2. Build prompt & call LLM (Turn 1: Strategy + Code Generation)
         prompt = self._build_prompt(user_query, session_id, filename, metrics_context, rag_context, dfs)
+        
+        # Preemptively inject template placeholders if a template is mentioned
+        import re as _re
+        template_match = _re.search(r'@([\w-]+\.typ)', user_query)
+        if template_match:
+            template_name = template_match.group(1)
+            try:
+                from modules.llm.typst_template import TypstTemplateHelper
+                helper = TypstTemplateHelper()
+                placeholders = helper.get_placeholders(template_name)
+                hints = helper.analyze_template_structure(template_name)
+                
+                prompt += (
+                    f"\n\n*** USER REQUESTED PDF GENERATION USING TEMPLATE '{template_name}' ***\n"
+                    f"I have preemptively analyzed this template. The EXACT keys you MUST use in your final data dictionaries are:\n"
+                    f"{placeholders}\n\n"
+                    f"CRITICAL: Do NOT generate keys like 'TOTAL_REVENUE' if the template expects 'REVENUE'. Strictly map your Polars aliases to these exact names.\n"
+                )
+                
+                if hints.get("expected_table_columns"):
+                    num_cols = hints["expected_table_columns"]
+                    headers_hint = ""
+                    if hints.get("headers"):
+                        headers_hint = f"Based on the template, the columns appear to be: {', '.join(hints['headers'])}\n"
+                    
+                    prompt += (
+                        f"CRITICAL LAYOUT HINT: The Typst template expects EXACTLY {num_cols} columns in its tables.\n"
+                        f"{headers_hint}"
+                        f"This means EVERY single string row you append to TABLE_BODY MUST have EXACTLY {num_cols} comma-separated `[value]` cells.\n"
+                        f"You MUST explicitly map your DataFrame columns 1-to-1 to these {num_cols} headers IN THE EXACT SAME ORDER.\n"
+                        f"If you skip a metric, map them out of order, or generate 5 or 7 cells instead of {num_cols}, the Typst table format will be violently destroyed and the numbers will appear in the wrong columns!\n"
+                        f"Even if the extracted headers are slightly ambiguous, YOU MUST USE REAL DATA and YOU MUST MATCH THE {num_cols} COLUMN COUNT. NEVER generate fake/repeated numbers.\n"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to preemptively read template {template_name}: {e}")
         create_params = {
             "model": effective_model,
             "messages": [
@@ -372,16 +407,38 @@ Respond with ONLY the corrected JSON (with fixed `python_code`). Keep all other 
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.1,
+            "max_tokens": 8192,
         }
-        if settings.CHAT_PROVIDER == "openai":
-            create_params["response_format"] = {"type": "json_object"}
+        # Try with response_format: json_object first (most modern models support it)
+        # If the model doesn't support it (returns 400), retry without it
+        create_params["response_format"] = {"type": "json_object"}
 
         try:
             with Timer() as t_llm1:
                 raw_content = self._call_llm(create_params, total_usage)
+        except Exception as e:
+            err_str = str(e)
+            if "response_format" in err_str or ("400" in err_str and "json" in err_str.lower()):
+                logger.warning("response_format_not_supported_falling_back", error=err_str[:120])
+                del create_params["response_format"]
+                with Timer() as t_llm1:
+                    raw_content = self._call_llm(create_params, total_usage)
+            else:
+                raise
+
+        try:
             logger.info("llm_turn_1", duration_ms=t_llm1.duration_ms, tokens=total_usage.total_tokens)
             cleaned_initial = OutputParser.clean_json(raw_content)
-            initial_parsed = json.loads(cleaned_initial)
+            try:
+                initial_parsed = json.loads(cleaned_initial)
+            except json.JSONDecodeError:
+                # Fallback: try ast.literal_eval for single-quoted JSON from some LLMs
+                import ast as _ast
+                try:
+                    initial_parsed = _ast.literal_eval(cleaned_initial)
+                except (ValueError, SyntaxError):
+                    logger.error(f"Failed to parse LLM Turn 1 output. Raw:\n{raw_content[:500]}")
+                    raise
             python_code = initial_parsed.get("python_code")
 
             # 3. Execute code if present
@@ -434,6 +491,25 @@ CRITICAL RULES:
                 parsed_response.python_code = python_code
             if not parsed_response.answer or parsed_response.answer.strip() == "":
                 parsed_response.answer = "Analysis complete. Please see detailed results below."
+
+
+            # 5b. Auto-extract generated PDF URL from code output and embed as base64
+            if python_code and (data_context or dfs) and exec_result:
+                output_text = exec_result.get('output', '')
+                import re as _re, os as _os, base64 as _b64
+                pdf_match = _re.search(r'GENERATED_PDF_URL:\s*(\S+)', output_text)
+                if pdf_match:
+                    raw_url = pdf_match.group(1)
+                    # Resolve the actual file path from the URL
+                    filename = _os.path.basename(raw_url)
+                    pdf_path = _os.path.join(settings.STORAGE_DIR, filename)
+                    if _os.path.exists(pdf_path):
+                        with open(pdf_path, 'rb') as _f:
+                            b64_data = _b64.b64encode(_f.read()).decode('utf-8')
+                        parsed_response.generated_file = f"data:application/pdf;base64,{b64_data}"
+                        logger.info("pdf_embedded_as_base64", filename=filename, size_kb=len(b64_data)//1024)
+                    else:
+                        logger.warning("pdf_file_not_found_for_base64", path=pdf_path)
 
             self.memory.add_message(session_id, "user", user_query)
             self.memory.add_message(session_id, "ai", parsed_response.answer, data=parsed_response.model_dump())

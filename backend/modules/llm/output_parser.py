@@ -1,4 +1,6 @@
 import json
+import ast
+import re
 import logging
 from typing import Optional, Any
 from models.response_models import AnalysisResponse
@@ -14,16 +16,60 @@ class OutputParser:
         if not raw_content:
             return "{}"
         cleaned = raw_content.strip()
+        
+        # Strip markdown code fences
         if cleaned.startswith("```"):
-            import re
             match = re.search(r'```(?:json)?(.*?)```', cleaned, re.DOTALL | re.IGNORECASE)
             if match:
                 cleaned = match.group(1).strip()
+        
+        # Extract JSON object
         if "{" in cleaned and "}" in cleaned:
             start = cleaned.find("{")
             end = cleaned.rfind("}")
             if start != -1 and end != -1 and start < end:
                 cleaned = cleaned[start:end+1]
+        
+        # Try parsing as-is first
+        try:
+            json.loads(cleaned)
+            return cleaned
+        except json.JSONDecodeError:
+            pass
+        
+        # Fix common LLM JSON issues:
+        # 1. Remove trailing commas before } or ]
+        cleaned = re.sub(r',\s*([}\]])', r'\1', cleaned)
+        
+        # 2. Try again after trailing comma fix
+        try:
+            json.loads(cleaned)
+            return cleaned
+        except json.JSONDecodeError:
+            pass
+        
+        # 3. Try using ast.literal_eval (handles single quotes, True/False/None)
+        try:
+            parsed = ast.literal_eval(cleaned)
+            return json.dumps(parsed, ensure_ascii=False)
+        except (ValueError, SyntaxError):
+            pass
+        
+        # 4. Attempt to fix single quotes by replacing them
+        # Replace single-quoted keys/values with double-quoted ones
+        # This is a best-effort heuristic
+        try:
+            fixed = cleaned.replace("'", '"')
+            # Fix Python True/False/None → JSON true/false/null
+            fixed = re.sub(r'\bTrue\b', 'true', fixed)
+            fixed = re.sub(r'\bFalse\b', 'false', fixed)
+            fixed = re.sub(r'\bNone\b', 'null', fixed)
+            json.loads(fixed)
+            return fixed
+        except json.JSONDecodeError:
+            pass
+        
+        # Return best effort
         return cleaned
 
     @staticmethod
@@ -31,7 +77,11 @@ class OutputParser:
         """Parse raw JSON string into AnalysisResponse Pydantic model."""
         try:
             cleaned_content = OutputParser.clean_json(raw_content)
-            parsed_data = json.loads(cleaned_content)
+            try:
+                parsed_data = json.loads(cleaned_content)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON Decode Error in OutputParser. Raw content:\n{raw_content}\nCleaned content:\n{cleaned_content}")
+                raise e
             
             # Extract charts (unified schema)
             charts = parsed_data.get("charts", [])
@@ -47,19 +97,32 @@ class OutputParser:
 
             logger.info(f"OutputParser: parsed {len(charts)} chart(s) from response")
 
+            # Validate recommendations and risks are lists of strings
+            def _stringify_list(items):
+                if not isinstance(items, list):
+                    return []
+                return [
+                    v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+                    for v in items
+                ]
+            
+            recommendations = _stringify_list(parsed_data.get("recommendations", []))
+            risks = _stringify_list(parsed_data.get("risks", []))
+
             return AnalysisResponse(
                 answer=parsed_data.get("answer", ""),
                 thought=parsed_data.get("thought", None),
                 python_code=parsed_data.get("python_code", None),
                 token_usage=token_usage,
                 key_metrics=parsed_data.get("key_metrics", {}),
-                recommendations=parsed_data.get("recommendations", []),
-                risks=parsed_data.get("risks", []),
+                recommendations=recommendations,
+                risks=risks,
                 confidence_score=parsed_data.get("confidence_score", 0.0),
                 charts=charts,
                 table_data=parsed_data.get("table_data", None),
                 chart_data=None,  # Deprecated: always use charts
-                source_documents=[rag_context] if rag_context else []
+                source_documents=[rag_context] if rag_context else [],
+                generated_file=parsed_data.get("generated_file", None)
             )
         except json.JSONDecodeError as e:
             logger.error(f"JSON Parsing failed: {e}")

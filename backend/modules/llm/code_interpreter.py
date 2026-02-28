@@ -24,6 +24,7 @@ import re
 import resource
 import polars as pl
 from typing import Dict, Any, Optional
+from modules.llm.typst_template import TypstTemplateHelper
 
 logger = structlog.get_logger(__name__)
 
@@ -53,6 +54,11 @@ BLOCKED_BUILTINS = frozenset({
     "memoryview", "bytearray", "bytes",
 })
 
+def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name in BLOCKED_MODULES or (name.split(".")[0] in BLOCKED_MODULES):
+        raise ImportError(f"Import of '{name}' is blocked by security policy.")
+    return __import__(name, globals, locals, fromlist, level)
+
 # Only these builtins are exposed to executed code
 SAFE_BUILTINS = {
     "print": print, "len": len, "range": range, "str": str,
@@ -67,11 +73,13 @@ SAFE_BUILTINS = {
     "ValueError": ValueError, "TypeError": TypeError,
     "KeyError": KeyError, "IndexError": IndexError,
     "Exception": Exception,
+    "__import__": safe_import,
 }
 
 POLARS_CORRECTIONS = [
     # Pandas → Polars method renames
     (".groupby(", ".group_by("),
+    (".group_by().agg(", ".select("),  # Fix empty groupby compute error in Polars 1.x
     (".first()", ".head(1)"),
     (".isnull()", ".is_null()"),
     (".notnull()", ".is_not_null()"),
@@ -96,20 +104,8 @@ POLARS_CORRECTIONS = [
     (".lazy()", ""),            # df.lazy() → df (keep eager)
 ]
 
-# Import lines that should be silently stripped because the modules
-# are already pre-injected into the sandbox globals.
-STRIPPED_IMPORT_PATTERNS = [
-    r"^\s*import polars as pl\s*$",
-    r"^\s*import polars\s*$",
-    r"^\s*from polars import .*$",
-    r"^\s*import datetime.*$",
-    r"^\s*from datetime import .*$",
-    r"^\s*import math\s*$",
-    r"^\s*from math import .*$",
-    r"^\s*import re\s*$",
-    r"^\s*from collections import .*$",
-]
-
+# ─────────────────────────────────────────────────
+# AST VALIDATOR
 EXEC_TIMEOUT_SECONDS = 10
 MAX_OUTPUT_BYTES = 50 * 1024  # 50KB stdout cap
 MAX_MEMORY_MB = 256
@@ -211,6 +207,7 @@ def _worker(code: str, data_json: str, result_queue: multiprocessing.Queue):
             "re": re,
             "collections": collections,
             "__builtins__": SAFE_BUILTINS,
+            "TypstTemplateHelper": TypstTemplateHelper,
         }
         exec(code, safe_globals, locals_dict)
 
@@ -238,7 +235,7 @@ class CodeInterpreter:
     """Hardened Python/Polars code executor with multi-layer security."""
 
     def _preprocess_code(self, code: str) -> str:
-        """Auto-correct common Pandas-style syntax and strip pre-injected imports."""
+        """Auto-correct common Pandas-style syntax."""
         for old, new in POLARS_CORRECTIONS:
             code = code.replace(old, new)
         code = re.sub(
@@ -246,18 +243,11 @@ class CodeInterpreter:
             r'.rename(\1)',
             code,
         )
-        # Strip imports that are already pre-injected in the sandbox
-        lines = code.split('\n')
-        cleaned = []
-        for line in lines:
-            stripped = False
-            for pattern in STRIPPED_IMPORT_PATTERNS:
-                if re.match(pattern, line):
-                    stripped = True
-                    break
-            if not stripped:
-                cleaned.append(line)
-        code = '\n'.join(cleaned)
+        # Fix literal newlines inside string literals that the LLM sometimes generate
+        # e.g., table_body = "\n".join(rows) where the \n is an actual newline
+        # We detect lines that start/end with a quote and the "string" spans lines
+        code = re.sub(r'"(\r?\n)"', r'"\\n"', code)
+        code = re.sub(r"'(\r?\n)'", r"'\\n'", code)
         return code
 
     def _check_security(self, code: str) -> Optional[str]:
@@ -359,6 +349,7 @@ class CodeInterpreter:
             "re": re,
             "collections": collections,
             "__builtins__": SAFE_BUILTINS,
+            "TypstTemplateHelper": TypstTemplateHelper,
         }
         locals_dict = {}
         if df is not None:

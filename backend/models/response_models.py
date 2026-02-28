@@ -43,6 +43,7 @@ class AnalysisResponse(BaseModel):
     table_data: Optional[Dict[str, Any]] = None
     chart_data: Optional[List[Dict[str, Any]]] = None # Legacy
     source_documents: Optional[List[str]] = []
+    generated_file: Optional[str] = None # URL or path to generated PDF
     status: str = "success"
 
 class FileInfo(BaseModel):
