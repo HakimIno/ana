@@ -1,0 +1,21 @@
+/* Basic styles for Typst content */
+.typst-doc {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.typst-svg {
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+}
+
+.typst-page {
+  background: white;
+  box-shadow:
+    0 4px 6px -1px rgb(0 0 0 / 0.1),
+    0 2px 4px -2px rgb(0 0 0 / 0.1);
+  margin-bottom: 2rem;
+}

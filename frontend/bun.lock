@@ -6,7 +6,10 @@
       "dependencies": {
         "@emotion/react": "^11.14.0",
         "@emotion/styled": "^11.14.1",
+        "@myriaddreamin/typst-ts-renderer": "^0.7.0-rc2",
+        "@myriaddreamin/typst-ts-web-compiler": "^0.7.0-rc2",
         "@myriaddreamin/typst.react": "^0.7.0-rc2",
+        "@myriaddreamin/typst.ts": "^0.7.0-rc2",
         "@tanstack/react-query": "^5.90.21",
         "axios": "^1.13.5",
         "clsx": "^2.1.1",
@@ -184,6 +187,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@myriaddreamin/typst-ts-renderer": ["@myriaddreamin/typst-ts-renderer@0.7.0-rc2", "", {}, "sha512-god1tcb2YJDkQfA8gLGcAmykVGBpNKorqqDkXVy3InC18KRbsverJhlrHoONurNIU9JuIHoWjJ2D1ntpjPgzbA=="],
+
+    "@myriaddreamin/typst-ts-web-compiler": ["@myriaddreamin/typst-ts-web-compiler@0.7.0-rc2", "", {}, "sha512-WFO/ecKUfeclld5uDxyjgpnIafKpp2LrS6T1vY+CHaSxCm099AneAQIYFg+OtX+NbFpJsLGCBFSw/qppJJmBAw=="],
 
     "@myriaddreamin/typst.react": ["@myriaddreamin/typst.react@0.7.0-rc2", "", { "peerDependencies": { "@myriaddreamin/typst-ts-renderer": "^0.7.0-rc2", "@myriaddreamin/typst.ts": "^0.7.0-rc2", "react": "^17.0.1 || ^18.x || ^19.x", "react-dom": "^17.0.1 || ^18.x || ^19.x" } }, "sha512-zohe8XXnCalRwY1HH10ZS9xKYaW3G31P2l6fA0eGTIHC5fHby/XIG5mBUqxM+9PxwYCbaFi/N+PMwqkhxrEoUA=="],
 
