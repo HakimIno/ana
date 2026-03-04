@@ -34,7 +34,10 @@ class Embedder:
                 with Embedder._dense_lock:
                     if Embedder._dense_model is None:
                         from fastembed import TextEmbedding
-                        Embedder._dense_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+                        Embedder._dense_model = TextEmbedding(
+                            model_name="BAAI/bge-small-en-v1.5",
+                            cache_dir=str(settings.FASTEMBED_CACHE_PATH)
+                        )
             self.dense_model = Embedder._dense_model
         
         # Initialize Sparse Encoder for Hybrid Search as a Singleton
@@ -45,7 +48,8 @@ class Embedder:
                     cpus = multiprocessing.cpu_count()
                     Embedder._sparse_model = SparseTextEmbedding(
                         model_name="prithivida/Splade_PP_en_v1",
-                        threads=max(1, cpus // 2)
+                        threads=max(1, cpus // 2),
+                        cache_dir=str(settings.FASTEMBED_CACHE_PATH)
                     )
         
         self.sparse_model = Embedder._sparse_model
