@@ -1,0 +1,11 @@
+// Editor constants
+export const EDITOR_CONSTANTS = {
+  FONT_SIZE: 14,
+  LINE_HEIGHT: 1.5,
+  PADDING: 12,
+  TAB_SIZE: 2,
+  INDENT_SIZE: 2,
+  MIN_LINE_NUMBER_WIDTH: 50,
+  FILE_TAB_HEIGHT: 40,
+  STATUS_BAR_HEIGHT: 22,
+} as const;
