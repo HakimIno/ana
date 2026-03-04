@@ -242,3 +242,83 @@
 .slide-up {
   animation: slideUp 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
+/* ── Typing Indicator ── */
+.typing-indicator {
+  display: flex;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.typing-indicator span {
+  width: 6px;
+  height: 6px;
+  background: #bbb;
+  border-radius: 50%;
+  animation: typing-bounce 1.4s infinite ease-in-out both;
+}
+
+.typing-indicator span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+.typing-indicator span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes typing-bounce {
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+/* ── Terminal Shell Shell ── */
+.terminal-shell pre::-webkit-scrollbar {
+  height: 4px;
+}
+
+.terminal-shell pre::-webkit-scrollbar-thumb {
+  background: #444;
+  border-radius: 10px;
+}
+
+.terminal-shell pre::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+/* ── Terminal Specific UX ── */
+.terminal-shell.collapsed .terminal-cursor {
+  display: none;
+}
+
+.terminal-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 16px;
+  background: #4ade80;
+  margin-left: 2px;
+  vertical-align: middle;
+  animation: cursor-blink 1s step-end infinite;
+}
+
+@keyframes cursor-blink {
+  from,
+  to {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.terminal-shell.expanded {
+  border-color: rgba(74, 222, 128, 0.3) !important;
+}
+
+.terminal-shell.collapsed:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}

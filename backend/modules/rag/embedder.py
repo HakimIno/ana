@@ -80,3 +80,9 @@ class Embedder:
     def get_embedding(self, text: str) -> List[float]:
         """Generate embedding for a single text."""
         return self.get_embeddings([text])[0]
+
+    def get_dimension(self) -> int:
+        """Return the dimension of the embeddings produced by the current provider."""
+        if self.provider == "local":
+            return 384 # Dimension of BAAI/bge-small-en-v1.5
+        return 1536 # Dimension of OpenAI / Z.AI standard models

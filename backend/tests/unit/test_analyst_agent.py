@@ -189,3 +189,79 @@ class TestAnalystAgent:
         result = agent.analyze("Analyze revenue", data_context=data)
         assert result.answer == "Analysis complete."
         assert result.python_code == "print('hello')"
+
+    # ─────────────────────────────────────────────
+    # Self-Correction Loop (retry logic)
+    # ─────────────────────────────────────────────
+
+    def test_retry_loop_max_3_attempts(self, agent, mock_client):
+        """Test that _execute_with_retry calls LLM up to 3 times for code fixes plus the original."""
+        from models.response_models import TokenUsage
+
+        # Turn 1: returns code that will fail
+        turn1_json = json.dumps({
+            "python_code": "bad_code()",
+            "answer": "", "key_metrics": {},
+            "recommendations": [], "risks": [], "confidence_score": 0.5
+        })
+
+        # Each retry also returns fixable code
+        retry_json = json.dumps({
+            "python_code": "still_bad_code()",
+            "answer": "", "key_metrics": {},
+            "recommendations": [], "risks": [], "confidence_score": 0.5
+        })
+
+        # Mock the LLM: 3 retry calls
+        mock_client.chat.completions.create.side_effect = [
+            MagicMock(usage=None, choices=[MagicMock(message=MagicMock(content=retry_json))]),
+            MagicMock(usage=None, choices=[MagicMock(message=MagicMock(content=retry_json))]),
+            MagicMock(usage=None, choices=[MagicMock(message=MagicMock(content=retry_json))]),
+        ]
+
+        # Mock interpreter to always fail
+        agent.interpreter.execute = MagicMock(return_value={
+            "success": False, "output": "", "error": "NameError: bad_code", "lint_warnings": []
+        })
+        agent.orchestrator = MagicMock()
+
+        total_usage = TokenUsage()
+        create_params = {"messages": []}
+        exec_result, final_code = agent._execute_with_retry(
+            "bad_code()", turn1_json, create_params, total_usage, max_retries=3
+        )
+
+        # Should have called LLM 3 times for retries
+        assert mock_client.chat.completions.create.call_count == 3
+        assert exec_result["success"] is False
+
+    def test_failed_code_blocks_hallucination(self, agent):
+        """Test that _build_refinement_prompt blocks hallucination when code failed."""
+        exec_result = {"output": "", "error": "SyntaxError: invalid syntax"}
+        prompt = agent._build_refinement_prompt("bad_code()", exec_result, "สรุปกำไร", code_failed=True)
+
+        assert "MUST NOT fabricate" in prompt
+        assert "confidence_score to 0.0" in prompt
+        assert "ไม่สามารถคำนวณ" in prompt
+
+    def test_successful_code_no_hallucination_block(self, agent):
+        """Test that _build_refinement_prompt does NOT add failure block when code succeeded."""
+        exec_result = {"output": "Revenue: 100000", "error": None}
+        prompt = agent._build_refinement_prompt("print(100000)", exec_result, "สรุปกำไร", code_failed=False)
+
+        assert "MUST NOT fabricate" not in prompt
+        assert "0.95+" in prompt
+
+    # ─────────────────────────────────────────────
+    # YAML System Prompt Loader
+    # ─────────────────────────────────────────────
+
+    def test_yaml_prompt_loads(self):
+        """Test that the YAML-based system prompt loads correctly."""
+        from modules.llm.prompts import load_system_prompt
+        prompt = load_system_prompt()
+        assert len(prompt) > 100
+        assert "Data Analyst" in prompt
+        assert "JSON" in prompt
+        assert "hallucination" in prompt.lower() or "fabricat" in prompt.lower() or "fabricate" in prompt.lower()
+

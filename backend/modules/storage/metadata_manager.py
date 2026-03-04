@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 class MetadataManager:
     """Manages business-to-technical mapping for spreadsheet columns."""
 
-    def __init__(self, storage_dir: Path = settings.STORAGE_DIR):
-        self.storage_dir = Path(storage_dir)
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self, metadata_dir: Path = settings.METADATA_DIR):
+        self.metadata_dir = Path(metadata_dir)
+        self.metadata_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_metadata_path(self, filename: str) -> Path:
-        return self.storage_dir / f"{filename}.metadata.json"
+        return self.metadata_dir / f"{filename}.metadata.json"
 
     def get_dictionary(self, filename: str) -> Dict[str, str]:
         """Retrieves the business term mapping for a file."""

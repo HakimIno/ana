@@ -1,6 +1,8 @@
 export interface Message {
     role: "user" | "ai" | "assistant";
     content: string;
+    thought?: string;
+    python_code?: string;
     data?: any;
 }
 

@@ -1,5 +1,6 @@
 from datetime import datetime
 import json
+import os
 from typing import List, Dict, Any, Optional
 
 import polars as pl
@@ -13,6 +14,7 @@ from modules.llm.code_interpreter import CodeInterpreter
 from modules.llm.memory.database import ChatMemory
 from modules.llm.output_parser import OutputParser
 from modules.llm.prompts import ANALYST_SYSTEM_PROMPT, QUERY_PROMPT_TEMPLATE
+from modules.data.orchestrator import DataOrchestrator
 from modules.rag.embedder import Embedder
 from modules.rag.retriever import Retriever
 from modules.rag.vector_store import VectorStore
@@ -297,49 +299,156 @@ class AnalystAgent:
         return response.choices[0].message.content
 
     # ─────────────────────────────────────────────
-    # CODE EXECUTION + AUTO-RETRY
+    # REFINEMENT PROMPT (shared by analyze + analyze_stream)
+    # ─────────────────────────────────────────────
+
+    def _build_refinement_prompt(
+        self, python_code: str, exec_result: Dict, user_query: str, code_failed: bool
+    ) -> str:
+        """
+        Build the Turn 2 refinement prompt with anti-hallucination guardrails.
+        
+        If code_failed=True, injects strict rules that BLOCK the LLM from
+        fabricating numbers, forcing it to admit the calculation failed.
+        """
+        # Anti-hallucination guardrail
+        if code_failed:
+            failure_block = """
+⚠️ EXECUTION FAILED AFTER ALL RETRIES. CRITICAL ANTI-HALLUCINATION RULE:
+- You MUST NOT fabricate, estimate, or invent ANY numbers.
+- Your answer MUST clearly state: "ไม่สามารถคำนวณได้เนื่องจากข้อผิดพลาดทางเทคนิค กรุณาลองใหม่อีกครั้ง"
+  (or equivalent in the user's language)
+- Set confidence_score to 0.0
+- Set charts to []
+- Set key_metrics to {}
+- Do NOT present any numerical data whatsoever.
+- This is a CRITICAL SAFETY RULE. Presenting fabricated data leads to wrong business decisions."""
+        else:
+            failure_block = ""
+
+        return f"""EXECUTION RESULTS:
+Code: {python_code}
+Output: {exec_result['output']}
+Error: {exec_result['error']}
+{failure_block}
+
+ORIGINAL USER QUESTION: {user_query}
+
+ACTION: Provide your FINAL JSON response based on the results above. ALL fields must be in valid JSON.
+
+CRITICAL RULES:
+1. LANGUAGE: Your `answer` MUST be written in the EXACT SAME language as the ORIGINAL USER QUESTION above.
+   - If the user asked in Thai → answer in Thai. If in English → answer in English. NEVER mix languages.
+2. NO_DATA_FOUND: If the Output contains "NO_DATA_FOUND" or shows 0 rows or empty results:
+   - Your `answer` MUST clearly state that no data was found for the user's EXACT criteria.
+   - Include the available date range if printed in the Output.
+   - Set `charts` to [] (empty). Do NOT create charts with fabricated or substituted data.
+   - Set `confidence_score` to 0.0.
+   - NEVER silently substitute a different date, year, branch, or any filter value.
+3. NUMBERS: Cite exact numbers from the Output. Do NOT round or paraphrase. If a value is not in the Output, do not mention it.
+4. CHARTS: If the user asked for a chart/graph/กราฟ AND the Output contains data, populate `charts`:
+   Format: [{{"type": "bar|line|area|pie|radar", "title": "...", "data": [{{"label": "...", "value": 123}}]}}]
+   - Parse the Output carefully and map category→label, numeric→value.
+   - NEVER leave `charts` empty if the user asked for a visualization AND data exists.
+5. ANOMALIES: If any value looks suspicious (negative where positive expected, extreme outliers), note it in `risks`.
+6. The `answer` field MUST NOT be empty.
+7. Set confidence_score: 0.95+ if all numbers from code, 0.7-0.9 if mixed, <0.7 if fallback, 0.0 if no data found or execution failed."""
+
+    # ─────────────────────────────────────────────
+    # CODE EXECUTION + SELF-CORRECTION LOOP
     # ─────────────────────────────────────────────
 
     def _execute_with_retry(
         self, python_code: str, raw_content: str,
         create_params: Dict, total_usage: TokenUsage,
         dfs: Optional[Dict] = None, df: Optional[pl.DataFrame] = None,
+        db_path: Optional[str] = None,
+        max_retries: int = 3,
+        schema_hint: str = "",
     ) -> tuple:
-        """Execute code. If it fails, ask LLM to fix and retry once. Returns (exec_result, final_code)."""
-        exec_result = self.interpreter.execute(python_code, df=df, dfs=dfs)
+        """
+        Self-Correction Loop: Execute code, if it fails, send error + lint feedback
+        back to LLM, get corrected code, and retry up to max_retries times.
+        
+        Returns (exec_result, final_code).
+        """
+        # First execution
+        self.orchestrator.disconnect()
+        try:
+            exec_result = self.interpreter.execute(python_code, df=df, dfs=dfs, db_path=db_path)
+        finally:
+            self.orchestrator.reconnect()
 
         if exec_result["success"]:
             return exec_result, python_code
 
-        # Auto-retry
-        logger.warning("code_exec_failed", action="auto_retry", error=exec_result.get("error", "")[:300])
-        retry_prompt = f"""Your code FAILED with this error:
+        # Self-Correction Loop
+        create_params["messages"].append({"role": "assistant", "content": raw_content})
+
+        for attempt in range(1, max_retries + 1):
+            error_text = exec_result.get("error", "Unknown error")[:1500]
+            lint_warnings = exec_result.get("lint_warnings", [])
+            lint_section = ""
+            if lint_warnings:
+                lint_section = "\n\nLINT WARNINGS (fix these too):\n" + "\n".join(f"- {w}" for w in lint_warnings)
+
+            # Include schema hint so LLM knows exact table/column names
+            schema_section = ""
+            if schema_hint:
+                schema_section = f"\n\nAVAILABLE DATABASE SCHEMA (use these exact names):\n{schema_hint}"
+
+            logger.warning(
+                "code_exec_failed", 
+                action="self_correction", 
+                attempt=attempt, 
+                max_retries=max_retries,
+                error=error_text[:200]
+            )
+
+            retry_prompt = f"""Your code FAILED (attempt {attempt}/{max_retries}) with this error:
 ```
-{exec_result['error']}
+{error_text}
 ```
+{lint_section}{schema_section}
 
 Fix the code and try again. Common fixes:
-- ColumnNotFoundError → Check exact column names and casing in the `columns` list.
+- ColumnNotFoundError → Check exact column names and casing in the schema above.
 - ComputeError → Check data types, cast with `.cast(pl.Float64)` if needed.
 - SchemaError → Use `.alias()` to avoid name collisions.
+- SyntaxError → Fix Python syntax.
+- Use `db.execute('SELECT ... FROM table').pl()` for DuckDB queries.
 
 Respond with ONLY the corrected JSON (with fixed `python_code`). Keep all other fields empty."""
 
-        create_params["messages"].append({"role": "assistant", "content": raw_content})
-        create_params["messages"].append({"role": "user", "content": retry_prompt})
+            create_params["messages"].append({"role": "user", "content": retry_prompt})
 
-        retry_content = self._call_llm(create_params, total_usage)
-        try:
-            cleaned_retry = OutputParser.clean_json(retry_content)
-            retry_code = json.loads(cleaned_retry).get("python_code")
-            if retry_code:
-                python_code = retry_code
-                exec_result = self.interpreter.execute(retry_code, df=df, dfs=dfs)
-                logger.info("auto_retry_result", success=exec_result['success'])
-                create_params["messages"].append({"role": "assistant", "content": retry_content})
-        except json.JSONDecodeError:
-            logger.error("Auto-retry returned invalid JSON, skipping.")
+            try:
+                retry_content = self._call_llm(create_params, total_usage)
+                cleaned_retry = OutputParser.clean_json(retry_content)
+                retry_code = json.loads(cleaned_retry).get("python_code")
 
+                if retry_code:
+                    python_code = retry_code
+                    self.orchestrator.disconnect()
+                    try:
+                        exec_result = self.interpreter.execute(retry_code, df=df, dfs=dfs, db_path=db_path)
+                    finally:
+                        self.orchestrator.reconnect()
+
+                    logger.info("self_correction_result", attempt=attempt, success=exec_result["success"])
+                    create_params["messages"].append({"role": "assistant", "content": retry_content})
+
+                    if exec_result["success"]:
+                        return exec_result, python_code
+                else:
+                    logger.warning("self_correction_no_code", attempt=attempt)
+                    break  # LLM didn't provide code, no point retrying
+            except json.JSONDecodeError:
+                logger.error("self_correction_invalid_json", attempt=attempt)
+                break  # Can't parse, stop retrying
+
+        # All retries exhausted — mark as failed
+        logger.error("self_correction_exhausted", total_attempts=max_retries + 1)
         return exec_result, python_code
 
     # ─────────────────────────────────────────────
@@ -363,8 +472,36 @@ Respond with ONLY the corrected JSON (with fixed `python_code`). Keep all other 
             metrics_context = self._prepare_metrics_context(data_context, filename=filename, dfs=dfs, include_samples=True)
         logger.info("context_prepared", duration_ms=t_ctx.duration_ms)
 
-        # 2. Build prompt & call LLM (Turn 1: Strategy + Code Generation)
+        # 2. Setup Data Orchestrator & Ingest files
+        from modules.storage.file_manager import FileManager
+        file_manager = FileManager()
+        self.orchestrator = DataOrchestrator(session_id=session_id)
+        files_to_ingest = []
+        if filename:
+            # Handle possible comma-separated filenames
+            for f in filename.split(","):
+                f = f.strip()
+                if f:
+                    try:
+                        resolved_path = file_manager.get_file_path(f)
+                        files_to_ingest.append(str(resolved_path))
+                    except FileNotFoundError:
+                        logger.warning(f"File not found in storage: {f}")
+        if dfs:
+            # For dataframes already in memory, we ensure they are in DB too
+            # (In a real prod app, you might want to handle this differently)
+            for name in dfs.keys():
+                path = os.path.join("uploads", f"{name}.csv") # Assume they exist as CSVs
+                if os.path.exists(path):
+                    files_to_ingest.append(path)
+        
+        self.orchestrator.ingest_files(files_to_ingest)
+        db_schema_hint = self.orchestrator.get_schema_summary()
+        db_path = getattr(self.orchestrator.provider, 'db_path', None) if self.orchestrator.use_db else None
+
+        # 3. Build prompt & call LLM (Turn 1: Strategy + Code Generation)
         prompt = self._build_prompt(user_query, session_id, filename, metrics_context, rag_context, dfs)
+        prompt += f"\n\nDATABASE_SCHEMA:\n{db_schema_hint}\n"
         
         # Preemptively inject template placeholders if a template is mentioned
         import re as _re
@@ -414,19 +551,19 @@ Respond with ONLY the corrected JSON (with fixed `python_code`). Keep all other 
         create_params["response_format"] = {"type": "json_object"}
 
         try:
-            with Timer() as t_llm1:
-                raw_content = self._call_llm(create_params, total_usage)
-        except Exception as e:
-            err_str = str(e)
-            if "response_format" in err_str or ("400" in err_str and "json" in err_str.lower()):
-                logger.warning("response_format_not_supported_falling_back", error=err_str[:120])
-                del create_params["response_format"]
+            try:
                 with Timer() as t_llm1:
                     raw_content = self._call_llm(create_params, total_usage)
-            else:
-                raise
+            except Exception as e:
+                err_str = str(e)
+                if "response_format" in err_str or ("400" in err_str and "json" in err_str.lower()):
+                    logger.warning("response_format_not_supported_falling_back", error=err_str[:120])
+                    del create_params["response_format"]
+                    with Timer() as t_llm1:
+                        raw_content = self._call_llm(create_params, total_usage)
+                else:
+                    raise
 
-        try:
             logger.info("llm_turn_1", duration_ms=t_llm1.duration_ms, tokens=total_usage.total_tokens)
             cleaned_initial = OutputParser.clean_json(raw_content)
             try:
@@ -445,40 +582,15 @@ Respond with ONLY the corrected JSON (with fixed `python_code`). Keep all other 
             if python_code and (data_context or dfs):
                 df = pl.DataFrame(data_context) if data_context and not dfs else None
                 exec_result, python_code = self._execute_with_retry(
-                    python_code, raw_content, create_params, total_usage, dfs=dfs, df=df,
+                    python_code, raw_content, create_params, total_usage, 
+                    dfs=dfs, df=df, db_path=db_path, schema_hint=db_schema_hint
                 )
 
                 # 4. Final refinement (Turn 2: Summarize results)
-                refinement_prompt = f"""EXECUTION RESULTS:
-Code: {python_code}
-Output: {exec_result['output']}
-Error: {exec_result['error']}
-
-ORIGINAL USER QUESTION: {user_query}
-
-ACTION: Provide your FINAL JSON response based on the results above. ALL fields must be in valid JSON.
-
-CRITICAL RULES:
-1. LANGUAGE: Your `answer` MUST be written in the EXACT SAME language as the ORIGINAL USER QUESTION above.
-   - If the user asked in Thai → answer in Thai. If in English → answer in English. NEVER mix languages.
-2. NO_DATA_FOUND: If the Output contains "NO_DATA_FOUND" or shows 0 rows or empty results:
-   - Your `answer` MUST clearly state that no data was found for the user's EXACT criteria.
-   - Include the available date range if printed in the Output.
-   - Set `charts` to [] (empty). Do NOT create charts with fabricated or substituted data.
-   - Set `confidence_score` to 0.0.
-   - NEVER silently substitute a different date, year, branch, or any filter value.
-3. NUMBERS: Cite exact numbers from the Output. Do NOT round or paraphrase. If a value is not in the Output, do not mention it.
-4. CHARTS: If the user asked for a chart/graph/กราฟ AND the Output contains data, populate `charts`:
-   Format: [{{"type": "bar|line|area|pie|radar", "title": "...", "data": [{{"label": "...", "value": 123}}]}}]
-   - Parse the Output carefully. Examples of how to map output to chart data:
-     * If Output shows `branch: Thonglor, total: 50000` → {{"label": "Thonglor", "value": 50000}}
-     * If Output shows a Polars table with columns → map the category column to "label" and numeric column to "value"
-   - Each data item MUST have exactly "label" (string) and "value" (number) keys.
-   - Choose the chart type based on the data: categories→bar, time→area, proportions→pie.
-   - NEVER leave `charts` empty if the user asked for a visualization AND data exists.
-5. ANOMALIES: If any value looks suspicious (negative where positive expected, extreme outliers), note it in `risks`.
-6. The `answer` field MUST NOT be empty.
-7. Set confidence_score: 0.95+ if all numbers from code, 0.7-0.9 if mixed, <0.7 if fallback, 0.0 if no data found."""
+                code_failed = not exec_result["success"]
+                refinement_prompt = self._build_refinement_prompt(
+                    python_code, exec_result, user_query, code_failed
+                )
 
                 create_params["messages"].append({"role": "user", "content": refinement_prompt})
                 with Timer() as t_llm2:
@@ -514,10 +626,16 @@ CRITICAL RULES:
             self.memory.add_message(session_id, "user", user_query)
             self.memory.add_message(session_id, "ai", parsed_response.answer, data=parsed_response.model_dump())
 
+            # Cleanup Orchestrator
+            self.orchestrator.cleanup()
             return parsed_response
 
         except Exception as e:
             logger.error("analysis_failed", error=str(e))
+            # Cleanup Orchestrator
+            if hasattr(self, 'orchestrator'):
+                self.orchestrator.cleanup()
+            
             return AnalysisResponse(
                 answer=f"Analysis failed due to a system error: {str(e)}",
                 key_metrics={},
@@ -541,32 +659,80 @@ CRITICAL RULES:
         Turn 1 (code gen) is non-streamed. Turn 2 (final answer) is streamed.
         """
         from modules.llm.stream_handler import StreamHandler
+        import time
+        import asyncio
 
         total_usage = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
 
         # 1. Prepare context (same as analyze)
+        t0 = time.time()
         rag_context = self.retriever.get_context(user_query, top_k=5, filename=filename)
-        metrics_context = self._prepare_metrics_context(data_context, filename=filename, dfs=dfs, include_samples=True)
+        t1 = time.time()
+        logger.info("retrieval_done", duration=round(t1-t0, 3))
 
-        # 2. Build prompt
+        # Turn 1: Don't include samples for profiling to save prompt tokens/time
+        metrics_context = self._prepare_metrics_context(data_context, filename=filename, dfs=dfs, include_samples=False)
+        t2 = time.time()
+        logger.info("profiling_done", duration=round(t2-t1, 3))
+
+        # 2. Setup Data Orchestrator
+        from modules.storage.file_manager import FileManager
+        file_manager = FileManager()
+        self.orchestrator = DataOrchestrator(session_id=session_id)
+        
+        files_to_ingest = []
+        if filename:
+            for f in filename.split(","):
+                f = f.strip()
+                if f:
+                    try:
+                        resolved_path = file_manager.get_file_path(f)
+                        files_to_ingest.append(str(resolved_path))
+                    except FileNotFoundError:
+                        logger.warning(f"File not found in storage: {f}")
+        
+        self.orchestrator.ingest_files(files_to_ingest)
+        t3 = time.time()
+        logger.info("ingestion_done", duration=round(t3-t2, 3))
+
+        db_schema_hint = self.orchestrator.get_schema_summary()
+        db_path = getattr(self.orchestrator.provider, 'db_path', None) if self.orchestrator.use_db else None
+
+        # 3. Build prompt
         prompt = self._build_prompt(user_query, session_id, filename, metrics_context, rag_context, dfs)
+        prompt += f"\n\nDATABASE_SCHEMA:\n{db_schema_hint}\n"
+        
+        effective_provider = settings.CHAT_PROVIDER
+        effective_model = self.model_name
+        
+        # Provide immediate feedback
+        yield StreamHandler._sse_event("status", "Thinking about your question...")
+
         create_params = {
-            "model": self.model_name,
+            "model": effective_model,
             "messages": [
                 {"role": "system", "content": ANALYST_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.1,
+            "max_tokens": 4096,
         }
-        if settings.CHAT_PROVIDER == "openai":
+        if effective_provider == "openai":
             create_params["response_format"] = {"type": "json_object"}
 
         try:
             # Turn 1: Non-streamed (code generation needs full JSON)
-            yield StreamHandler._sse_event("status", "Generating analysis strategy...")
-            raw_content = self._call_llm(create_params, total_usage)
+            logger.info("calling_llm_turn_1")
+            raw_content = await asyncio.to_thread(self._call_llm, create_params, total_usage)
+            t4 = time.time()
+            logger.info("llm_turn_1_done", duration=round(t4-t3, 3))
+
             cleaned_initial = OutputParser.clean_json(raw_content)
             initial_parsed = json.loads(cleaned_initial)
+            
+            if initial_parsed.get("thought"):
+                yield StreamHandler._sse_event("thought", initial_parsed["thought"])
+
             python_code = initial_parsed.get("python_code")
 
             exec_result = None
@@ -575,31 +741,19 @@ CRITICAL RULES:
                 yield StreamHandler._sse_event("status", "Executing code...")
 
                 df = pl.DataFrame(data_context) if data_context and not dfs else None
-                exec_result, python_code = self._execute_with_retry(
-                    python_code, raw_content, create_params, total_usage, dfs=dfs, df=df,
-                )
+                
+                def do_execute():
+                    return self._execute_with_retry(
+                        python_code, raw_content, create_params, total_usage, dfs=dfs, df=df, db_path=db_path,
+                        schema_hint=db_schema_hint
+                    )
+                exec_result, python_code = await asyncio.to_thread(do_execute)
 
                 # Build refinement prompt for Turn 2
-                refinement_prompt = f"""EXECUTION RESULTS:
-Code: {python_code}
-Output: {exec_result['output']}
-Error: {exec_result['error']}
-
-ORIGINAL USER QUESTION: {user_query}
-
-ACTION: Provide your FINAL JSON response based on the results above.
-
-CRITICAL RULES:
-1. LANGUAGE: Your `answer` MUST be written in the EXACT SAME language as the ORIGINAL USER QUESTION above.
-   - If the user asked in Thai → answer in Thai. If in English → answer in English. NEVER mix languages.
-2. NUMBERS: Cite exact numbers from the Output. Do NOT round or paraphrase.
-3. CHARTS: If the user asked for a chart/graph/กราฟ, you MUST populate the `charts` field with the computed data from the Output above.
-   Format: [{{"type": "bar|line|area|pie", "title": "...", "data": [{{"label": "...", "value": 123}}]}}]
-   - Extract the actual label/value pairs from the printed Output above.
-   - If the Output has lines like "Branch A: 12345", map them as {{"label": "Branch A", "value": 12345}}.
-   - NEVER leave `charts` empty if the user asked for a visualization.
-4. The `answer` field MUST NOT be empty.
-5. Set confidence_score: 0.95+ if all numbers from code, 0.7-0.9 if mixed, <0.7 if fallback."""
+                code_failed = not exec_result["success"]
+                refinement_prompt = self._build_refinement_prompt(
+                    python_code, exec_result, user_query, code_failed
+                )
 
                 create_params["messages"].append({"role": "user", "content": refinement_prompt})
 

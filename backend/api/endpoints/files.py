@@ -7,7 +7,6 @@ from models.response_models import FileInfo, JobStatusResponse
 from modules.ingestion.async_processor import process_file_async
 from modules.storage.file_manager import FileManager
 from modules.storage.metadata_manager import MetadataManager
-from modules.storage.df_cache import DataFrameCache
 from modules.rag.vector_store import VectorStore
 from utils.job_tracker import JobTracker
 
@@ -94,9 +93,6 @@ async def delete_file(filename: str):
     if not deleted:
         raise HTTPException(status_code=404, detail=f"File {filename} not found")
     
-    # Invalidate cache for this file
-    DataFrameCache().invalidate(filename)
-    
     # Reset vector store
     vector_store.reset()
     return {"message": f"File '{filename}' deleted and index reset"}
@@ -115,7 +111,6 @@ async def clear_storage():
     vector_store = VectorStore()
     file_manager.cleanup()
     vector_store.reset()
-    DataFrameCache().clear()
     return {"message": "Storage and index cleared"}
 
 @router.post("/files/sync")

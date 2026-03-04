@@ -35,13 +35,8 @@ class ExcelParser:
         clean = re.sub(r'\s+', '_', clean.strip().lower())
         return clean
 
-    def parse_file(self, file_path: str, sheet_name: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Parse Excel/CSV file, clean columns, and detect data types using Polars.
-        
-        Returns:
-            Dict containing cleaned data, columns, and detected types.
-        """
+    def parse_to_df(self, file_path: str, sheet_name: Optional[str] = None) -> pl.DataFrame:
+        """Parse file directly to a Polars DataFrame with cleaned columns."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
@@ -51,27 +46,36 @@ class ExcelParser:
 
         try:
             if ext == ".csv":
-                try:
-                    df = pl.read_csv(file_path)
-                except Exception as e:
-                    # Handle empty files or other CSV errors
-                    if "empty" in str(e).lower():
-                        return {"data": [], "columns": [], "types": {}, "row_count": 0, "sheet_name": sheet_name or "default"}
-                    raise e
+                df = pl.read_csv(file_path)
             else:
-                # Use calamine engine for speed and reliability
                 df = pl.read_excel(file_path, sheet_name=sheet_name or "Sheet1", engine="calamine")
 
             if df.is_empty():
-                return {"data": [], "columns": [], "types": {}, "row_count": 0, "sheet_name": sheet_name or "default"}
+                return df
 
             # Clean column names
             original_columns = df.columns
             cleaned_columns = [self.clean_column_name(col) for col in original_columns]
-            
-            # Rename columns in Polars
             rename_map = dict(zip(original_columns, cleaned_columns))
-            df = df.rename(rename_map)
+            return df.rename(rename_map)
+        except Exception as e:
+            logger.error(f"Error reading file to DF {file_path}: {e}")
+            raise e
+
+    def parse_file(self, file_path: str, sheet_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Parse Excel/CSV file, clean columns, and detect data types using Polars.
+        
+        Returns:
+            Dict containing cleaned data, columns, and detected types.
+        """
+        try:
+            df = self.parse_to_df(file_path, sheet_name)
+            
+            if df.is_empty():
+                return {"data": [], "columns": [], "types": {}, "row_count": 0, "sheet_name": sheet_name or "default"}
+
+            cleaned_columns = df.columns
 
             # Detect data types
             types = {}

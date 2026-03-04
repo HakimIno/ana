@@ -32,11 +32,11 @@ class StreamHandler:
         Stream the LLM response as SSE events.
         
         Event types:
-        - thinking: The AI's thought process
-        - token: A streamed answer token
-        - code: Python code for execution
+        - thought: The AI's thought process
+        - chunk: A streamed answer token
+        - python_code: Python code for execution
         - metrics: Key metrics
-        - done: Final complete response JSON
+        - result: Final complete response JSON
         - error: Error message
         """
         try:
@@ -57,7 +57,7 @@ class StreamHandler:
                 delta = chunk.choices[0].delta
                 if delta and delta.content:
                     accumulated += delta.content
-                    yield StreamHandler._sse_event("token", delta.content)
+                    yield StreamHandler._sse_event("chunk", delta.content)
 
             # Track usage from final chunk if available
             if hasattr(chunk, "usage") and chunk.usage:
@@ -71,9 +71,9 @@ class StreamHandler:
                 
                 # Send structured parts
                 if parsed_data.get("thought"):
-                    yield StreamHandler._sse_event("thinking", parsed_data["thought"])
+                    yield StreamHandler._sse_event("thought", parsed_data["thought"])
                 if parsed_data.get("python_code") and not exec_result:
-                    yield StreamHandler._sse_event("code", parsed_data["python_code"])
+                    yield StreamHandler._sse_event("python_code", parsed_data["python_code"])
                 if parsed_data.get("key_metrics"):
                     yield StreamHandler._sse_event("metrics", parsed_data["key_metrics"])
 
@@ -87,7 +87,7 @@ class StreamHandler:
             if python_code:
                 final_response.python_code = python_code
 
-            yield StreamHandler._sse_event("done", final_response.model_dump())
+            yield StreamHandler._sse_event("result", final_response.model_dump())
 
         except Exception as e:
             logger.error("stream_error", error=str(e))

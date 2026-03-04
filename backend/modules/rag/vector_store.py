@@ -43,17 +43,40 @@ class VectorStore:
         self.client = VectorStore._client
         self.collection_name = settings.QDRANT_COLLECTION_NAME
         
+        # We need the embedder dimension to ensure collection is correct
+        from modules.rag.embedder import Embedder
+        embedder = Embedder()
+        dimension = embedder.get_dimension()
+
         if not getattr(VectorStore, f"_collection_checked_{self.collection_name}", False):
-            self._ensure_collection()
+            self._ensure_collection(dimension)
             setattr(VectorStore, f"_collection_checked_{self.collection_name}", True)
 
-    def _ensure_collection(self):
-        """Ensure the collection exists with hybrid configuration."""
+    def _ensure_collection(self, dimension: int = 1536):
+        """Ensure the collection exists with correct dimension and hybrid configuration."""
         try:
             # Check if collection exists
             collection_info = self.client.get_collection(self.collection_name)
-            # Check if sparse config exists
+            
+            # Check for dimension mismatch
+            existing_dim = 0
             config_params = collection_info.config.params
+            if hasattr(config_params, 'vectors'):
+                # Handle different return structures
+                vectors_config = config_params.vectors
+                if hasattr(vectors_config, 'size'):
+                    existing_dim = vectors_config.size
+                elif isinstance(vectors_config, dict) and '' in vectors_config:
+                    existing_dim = vectors_config[''].size
+                elif hasattr(vectors_config, 'params') and hasattr(vectors_config.params, 'size'):
+                     existing_dim = vectors_config.params.size
+            
+            if existing_dim != dimension and existing_dim > 0:
+                logger.warning(f"Dimension mismatch in {self.collection_name}: existing {existing_dim}, required {dimension}. Recreating...")
+                self.client.delete_collection(self.collection_name)
+                raise Exception("Trigger recreation")
+
+            # Check if sparse config exists
             has_sparse = False
             # Try multiple ways to find it (names vary by qdrant-client version)
             if hasattr(config_params, 'sparse_vectors') and config_params.sparse_vectors:
@@ -76,7 +99,7 @@ class VectorStore:
         self.client.create_collection(
             collection_name=self.collection_name,
             vectors_config=models.VectorParams(
-                size=1536, # OpenAI embedding size
+                size=dimension,
                 distance=models.Distance.COSINE
             ),
             sparse_vectors_config={

@@ -13,8 +13,9 @@ logger = structlog.get_logger(__name__)
 class TypstTemplateHelper:
     """Helper for the AI to generate multi-page PDFs by filling a .typ template with data."""
 
-    def __init__(self, storage_dir: Path = settings.STORAGE_DIR):
-        self.storage_dir = storage_dir
+    def __init__(self, reports_dir: Path = settings.REPORTS_DIR):
+        self.reports_dir = reports_dir
+        self.reports_dir.mkdir(parents=True, exist_ok=True)
 
     def get_template_content(self, template_name: str) -> str:
         """Read the template file content from storage."""
@@ -22,7 +23,7 @@ class TypstTemplateHelper:
         if not template_name.endswith(".typ"):
             template_name += ".typ"
             
-        file_path = self.storage_dir / template_name
+        file_path = self.reports_dir / template_name
         if not file_path.exists():
             raise FileNotFoundError(f"Template not found: {template_name}")
             
@@ -182,7 +183,7 @@ class TypstTemplateHelper:
                     os.unlink(temp_path)
             
             # Save the generated PDF
-            output_path = self.storage_dir / output_filename
+            output_path = self.reports_dir / output_filename
             with open(output_path, "wb") as f:
                 f.write(pdf_bytes)
                 

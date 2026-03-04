@@ -51,6 +51,6 @@ def get_embedding_client():
 # but it's cleaner to handle via FastAPI dependency.
 
 def get_analyst_agent():
-    # This will be imported in main.py to handle the lifespan instance
-    from main import get_analyst_agent as main_get_agent
-    return main_get_agent()
+    """Dependency for getting the shared analyst agent."""
+    from modules.llm.factory import get_analyst_agent as factory_get_agent
+    return factory_get_agent()

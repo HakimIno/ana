@@ -92,27 +92,146 @@ const DataTray = styled.div`
   border-top: 1px solid rgba(0, 0, 0, 0.02);
 `;
 
-const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
+const ChatMessageItem = memo(({ msg, isStreaming = false }: { msg: Message, isStreaming?: boolean }) => {
   const isAI = msg.role === 'assistant' || msg.role === 'ai';
+  const [isTerminalExpanded, setIsTerminalExpanded] = useState(false);
+  const [isThoughtExpanded, setIsThoughtExpanded] = useState(isStreaming);
+  const terminalRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll terminal when streaming
+  useEffect(() => {
+    if (isStreaming && terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+    // Auto-collapse thought when stream finishes
+    if (!isStreaming) {
+      setIsThoughtExpanded(false);
+    } else {
+      setIsThoughtExpanded(true);
+    }
+  }, [msg.python_code, isStreaming]);
 
   return (
     <MessageBlock role={msg.role}>
       <ContentArea isAI={isAI}>
         <div className="text-payload">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+          {msg.content ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+          ) : (
+            isStreaming && <div className="typing-indicator"><span>.</span><span>.</span><span>.</span></div>
+          )}
         </div>
 
-        {isAI && msg.data && (
+        {isAI && (msg.data || msg.thought || msg.python_code) && (
           <DataTray>
-            {msg.data.python_code && (
-              <details className="arc-code-block" style={{ border: '1px solid rgba(0,0,0,0.03)', borderRadius: '10px', background: '#fcfcfc' }}>
-                <summary style={{ padding: '8px 12px', fontSize: '10px', fontWeight: 700, cursor: 'pointer', color: '#ccc' }}>
-                  LOGIC_TRACE
-                </summary>
-                <pre style={{ padding: '12px', background: '#fff', fontSize: '12.5px', overflowX: 'auto', borderTop: '1px solid rgba(0,0,0,0.01)' }}>
-                  <code>{msg.data.python_code}</code>
-                </pre>
-              </details>
+            {(msg.thought || msg.data?.thought) && (
+              <div style={{
+                background: '#fcfcfc',
+                borderRadius: '12px',
+                border: '1px solid rgba(0,0,0,0.06)',
+                overflow: 'hidden',
+                margin: '8px 0',
+                transition: 'all 0.3s ease'
+              }}>
+                <div
+                  onClick={() => setIsThoughtExpanded(!isThoughtExpanded)}
+                  style={{
+                    padding: '8px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    background: 'rgba(0,0,0,0.015)'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 600, color: '#666', letterSpacing: '0.02em' }}>
+                    <Sparkles size={12} color="#9333ea" />
+                    AI REASONING
+                  </div>
+                  <div style={{ color: '#aaa' }}>
+                    {isThoughtExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                  </div>
+                </div>
+                {isThoughtExpanded && (
+                  <div style={{
+                    padding: '12px 14px',
+                    fontSize: '12.5px',
+                    color: '#555',
+                    fontStyle: 'italic',
+                    borderTop: '1px solid rgba(0,0,0,0.04)',
+                    lineHeight: 1.5
+                  }}>
+                    {msg.thought || msg.data?.thought}
+                    {isStreaming && <span className="terminal-cursor" style={{ background: '#9333ea', height: '12px', marginLeft: '4px' }}>_</span>}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {(msg.python_code || msg.data?.python_code) && (
+              <div
+                className={`terminal-shell ${isTerminalExpanded ? 'expanded' : 'collapsed'}`}
+                style={{
+                  background: '#0a0a0a',
+                  borderRadius: '12px',
+                  overflow: 'hidden',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.15)',
+                  margin: '12px 0',
+                  border: '1px solid rgba(255,255,255,0.05)',
+                  transition: 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)'
+                }}
+              >
+                <div
+                  onClick={() => setIsTerminalExpanded(!isTerminalExpanded)}
+                  style={{
+                    background: '#1a1a1a',
+                    padding: '8px 14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    cursor: 'pointer',
+                    userSelect: 'none'
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ff5f56' }}></div>
+                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ffbd2e' }}></div>
+                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#27c93f' }}></div>
+                    <span style={{ fontSize: '10px', color: '#666', fontWeight: 800, letterSpacing: '0.05em', marginLeft: '8px' }}>LOGIC_TRACE.EXE</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10px', color: '#888', fontWeight: 700 }}>
+                    {isTerminalExpanded ? "COLLAPSE" : "EXPAND LOGIC"}
+                    {isTerminalExpanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                  </div>
+                </div>
+                <div
+                  ref={terminalRef}
+                  style={{
+                    padding: '16px',
+                    fontSize: '12.5px',
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    maxHeight: isTerminalExpanded ? '500px' : '100px',
+                    position: 'relative',
+                    maskImage: isTerminalExpanded ? 'none' : 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                    WebkitMaskImage: isTerminalExpanded ? 'none' : 'linear-gradient(to bottom, black 50%, transparent 100%)',
+                    transition: 'max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1)',
+                    scrollbarWidth: 'none'
+                  }}
+                >
+                  <pre style={{
+                    color: '#4ade80',
+                    fontFamily: 'var(--font-mono)',
+                    margin: 0,
+                    whiteSpace: 'pre-wrap',
+                    textShadow: '0 0 10px rgba(74, 222, 128, 0.2)'
+                  }}>
+                    <code>{msg.python_code || msg.data?.python_code}</code>
+                  </pre>
+                  {isStreaming && <span className="terminal-cursor">_</span>}
+                </div>
+              </div>
             )}
 
             {(msg.data?.charts || []).map((chart: any, idx: number) => (
@@ -124,11 +243,11 @@ const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
               />
             ))}
 
-            {msg.data.table_data && (
+            {/* {msg.data?.table_data && (
               <AnalysisTable data={msg.data.table_data} />
-            )}
+            )} */}
 
-            {msg.data.key_metrics && Object.keys(msg.data.key_metrics).length > 0 && (
+            {msg.data?.key_metrics && Object.keys(msg.data.key_metrics).length > 0 && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
                 {Object.entries(msg.data.key_metrics).map(([key, val]: any) => (
                   <div key={key} style={{ padding: '12px', borderRadius: '10px', background: 'rgba(0,0,0,0.01)' }}>
@@ -141,7 +260,7 @@ const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
               </div>
             )}
 
-            {msg.data.generated_file && (() => {
+            {msg.data?.generated_file && (() => {
               const fileUrl = msg.data.generated_file.startsWith('data:')
                 ? msg.data.generated_file
                 : `http://localhost:8000${msg.data.generated_file}`;
@@ -152,6 +271,10 @@ const ChatMessageItem = memo(({ msg }: { msg: Message }) => {
                   style={{
                     color: 'oklch(51.1% 0.262 276.966)',
                     fontSize: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    marginTop: '8px'
                   }}
                   onMouseOver={(e) => e.currentTarget.style.opacity = '0.9'}
                   onMouseOut={(e) => e.currentTarget.style.opacity = '1'}
@@ -377,6 +500,12 @@ const ChatInput = memo(({
       <InputMeta>
         <Circle size={4} fill={activeFile ? "#000" : "#ddd"} stroke="none" />
         <span>{activeFile ? "Agent active • session_linked" : "Agent standby • select source"}</span>
+        {activeFile && (
+          <span style={{ marginLeft: '12px', color: '#9333ea', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <Terminal size={10} />
+            DUCKDB_ENGINE: ON
+          </span>
+        )}
       </InputMeta>
       <InputPill style={{ position: 'relative' }}>
         {/* Mention Dropdown */}
@@ -477,26 +606,62 @@ export default function ChatInterface({ activeFile, sessionId, onMessageSent, se
     queryClient.setQueryData(["chatHistory", sessionId], [...currentMessages, userMessage, aiPlaceholder]);
 
     try {
-      const response = await chatService.postQuery(
+      await chatService.postQueryStream(
         userMsg,
+        (event) => {
+          if (event.type === 'status') {
+            setStreamStatus(event.data);
+          } else if (event.type === 'thought') {
+            queryClient.setQueryData(["chatHistory", sessionId], (prev: Message[] | undefined) => {
+              if (!prev) return prev;
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                thought: (prev[updated.length - 1]?.thought || "") + event.data
+              };
+              return updated;
+            });
+          } else if (event.type === 'python_code') {
+            queryClient.setQueryData(["chatHistory", sessionId], (prev: Message[] | undefined) => {
+              if (!prev) return prev;
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                python_code: event.data
+              };
+              return updated;
+            });
+          } else if (event.type === 'chunk') {
+            queryClient.setQueryData(["chatHistory", sessionId], (prev: Message[] | undefined) => {
+              if (!prev) return prev;
+              const updated = [...prev];
+              const last = updated[updated.length - 1];
+              updated[updated.length - 1] = {
+                ...last,
+                content: (last.content || "") + event.data
+              };
+              return updated;
+            });
+          } else if (event.type === 'result') {
+            // Final structured data
+            queryClient.setQueryData(["chatHistory", sessionId], (prev: Message[] | undefined) => {
+              if (!prev) return prev;
+              const updated = [...prev];
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                content: event.data.answer || updated[updated.length - 1].content,
+                data: event.data,
+              };
+              return updated;
+            });
+          }
+        },
         activeFile?.type === 'file' ? activeFile?.filename : undefined,
         sessionId,
         activeFile?.type === 'group' ? activeFile?.group : undefined,
         undefined, // filenames
-        selectedModel,
+        selectedModel
       );
-
-      // Set final message with full data (includes charts, metrics, etc.)
-      queryClient.setQueryData(["chatHistory", sessionId], (prev: Message[] | undefined) => {
-        if (!prev) return prev;
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: "assistant",
-          content: response.answer || "Analysis complete.",
-          data: response,
-        };
-        return updated;
-      });
     } catch (err) {
       queryClient.setQueryData(["chatHistory", sessionId], (prev: Message[] | undefined) => {
         if (!prev) return prev;
@@ -578,7 +743,11 @@ export default function ChatInterface({ activeFile, sessionId, onMessageSent, se
     <ChatWrapper>
       <div className="output-stream" ref={scrollRef}>
         {messages.map((msg, i) => (
-          <ChatMessageItem key={`${msg.role}-${i}`} msg={msg} />
+          <ChatMessageItem
+            key={`${msg.role}-${i}`}
+            msg={msg}
+            isStreaming={isSending && i === messages.length - 1}
+          />
         ))}
         {isHistoryLoading && (
           <div className="status-overlay" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', height: '200px', justifyContent: 'center' }}>

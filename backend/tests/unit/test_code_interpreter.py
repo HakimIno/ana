@@ -154,3 +154,36 @@ class TestCodeInterpreter:
         result = interpreter.execute("print(df['X'].sum())", df=df, use_subprocess=True)
         assert result["success"] is True
         assert "60" in result["output"]
+
+    # ─────────────────────────────────────────────
+    # Linter (lint_code)
+    # ─────────────────────────────────────────────
+
+    def test_lint_detects_syntax_error(self, interpreter):
+        """Linter should catch syntax errors before execution."""
+        warnings = interpreter.lint_code("if True print('x')")
+        assert len(warnings) == 1
+        assert "SYNTAX_ERROR" in warnings[0]
+
+    def test_lint_detects_matplotlib(self, interpreter):
+        """Linter should flag blocked visualization imports."""
+        warnings = interpreter.lint_code("import matplotlib\nprint('hi')")
+        assert any("matplotlib" in w for w in warnings)
+
+    def test_lint_passes_valid_code(self, interpreter):
+        """Valid Polars code should return no lint warnings."""
+        code = "result = df.group_by('Branch').agg(pl.col('Revenue').sum().alias('total'))\nprint(result)"
+        warnings = interpreter.lint_code(code)
+        assert len(warnings) == 0
+
+    def test_lint_detects_pandas_import(self, interpreter):
+        """Linter should flag pandas usage."""
+        warnings = interpreter.lint_code("import pandas as pd\ndf = pd.read_csv('test.csv')")
+        assert any("pandas" in w for w in warnings)
+
+    def test_lint_blocks_execution_on_syntax_error(self, interpreter):
+        """execute() should fail fast via lint without running subprocess."""
+        result = interpreter.execute("if True print('x')", use_subprocess=False)
+        assert result["success"] is False
+        assert "LINT FAILED" in result["error"]
+

@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     # Storage Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
     STORAGE_DIR: Path = BASE_DIR / "uploads"
+    DATASETS_DIR: Path = STORAGE_DIR / "datasets"
+    REPORTS_DIR: Path = STORAGE_DIR / "reports"
+    METADATA_DIR: Path = STORAGE_DIR / "metadata"
+    TEMP_DB_DIR: Path = STORAGE_DIR / "temp_dbs"
+    
     QDRANT_PATH: Path = BASE_DIR / "qdrant_db"
     
     QDRANT_COLLECTION_NAME: str = "business_data"
@@ -48,5 +53,9 @@ settings = Settings()
 
 # Ensure directories exist
 settings.STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+settings.DATASETS_DIR.mkdir(parents=True, exist_ok=True)
+settings.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+settings.METADATA_DIR.mkdir(parents=True, exist_ok=True)
+settings.TEMP_DB_DIR.mkdir(parents=True, exist_ok=True)
 settings.QDRANT_PATH.mkdir(parents=True, exist_ok=True)
 settings.FASTEMBED_CACHE_PATH.mkdir(parents=True, exist_ok=True)

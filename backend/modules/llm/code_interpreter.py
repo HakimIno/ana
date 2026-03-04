@@ -24,6 +24,7 @@ import re
 import resource
 import polars as pl
 from typing import Dict, Any, Optional
+import duckdb
 from modules.llm.typst_template import TypstTemplateHelper
 
 logger = structlog.get_logger(__name__)
@@ -172,7 +173,7 @@ def _validate_ast(code: str) -> Optional[str]:
 # SUBPROCESS WORKER
 # ─────────────────────────────────────────────────
 
-def _worker(code: str, data_json: str, result_queue: multiprocessing.Queue):
+def _worker(code: str, data_json: str, result_queue: multiprocessing.Queue, db_path: Optional[str] = None):
     """
     Runs in a separate process with resource limits.
     Communicates results back via multiprocessing.Queue.
@@ -199,6 +200,15 @@ def _worker(code: str, data_json: str, result_queue: multiprocessing.Queue):
             dfs = {k: pl.DataFrame(v) for k, v in env_data["dfs"].items()}
             locals_dict.update(dfs)
             locals_dict["dfs"] = dfs
+        
+        if db_path:
+            # Connect to the session-specific DuckDB file in read-only mode to avoid locking issues
+            try:
+                locals_dict["db"] = duckdb.connect(database=db_path, read_only=True)
+            except Exception as e:
+                # Fallback to memory if file is inaccessible
+                logger.warning(f"Failed to connect to DuckDB file {db_path} in read-only: {e}")
+                locals_dict["db"] = duckdb.connect(database=":memory:")
 
         safe_globals = {
             "pl": pl,
@@ -209,6 +219,9 @@ def _worker(code: str, data_json: str, result_queue: multiprocessing.Queue):
             "__builtins__": SAFE_BUILTINS,
             "TypstTemplateHelper": TypstTemplateHelper,
         }
+        if db_path:
+            safe_globals["duckdb"] = duckdb
+
         exec(code, safe_globals, locals_dict)
 
         output = output_buffer.getvalue()
@@ -234,8 +247,22 @@ def _timeout_handler(signum, frame):
 class CodeInterpreter:
     """Hardened Python/Polars code executor with multi-layer security."""
 
+    # Common Polars anti-patterns that LLMs often generate
+    _LINT_PATTERNS = [
+        (r'\.agg\(\s*pl\.col\([^)]+\)\.\w+\(\)\s*\)', 
+         "LINT: .agg() expression missing .alias('name'). Every .agg() MUST have .alias()."),
+        (r'import\s+matplotlib|import\s+seaborn|import\s+plotly|from\s+matplotlib',
+         "LINT: Visualization libraries (matplotlib/seaborn/plotly) are BLOCKED. Use the charts JSON field instead."),
+        (r'import\s+pandas|from\s+pandas',
+         "LINT: pandas is not available. Use polars (pl) instead."),
+        (r'\.iterrows\(\)',
+         "LINT: .iterrows() is pandas syntax. Use .to_dicts() for Polars row iteration."),
+        (r'\.sort_values\(',
+         "LINT: .sort_values() is pandas syntax. Use .sort() in Polars."),
+    ]
+
     def _preprocess_code(self, code: str) -> str:
-        """Auto-correct common Pandas-style syntax."""
+        """Auto-correct common Pandas-style syntax and date-as-string mistakes."""
         for old, new in POLARS_CORRECTIONS:
             code = code.replace(old, new)
         code = re.sub(
@@ -244,11 +271,64 @@ class CodeInterpreter:
             code,
         )
         # Fix literal newlines inside string literals that the LLM sometimes generate
-        # e.g., table_body = "\n".join(rows) where the \n is an actual newline
-        # We detect lines that start/end with a quote and the "string" spans lines
-        code = re.sub(r'"(\r?\n)"', r'"\\n"', code)
-        code = re.sub(r"'(\r?\n)'", r"'\\n'", code)
+        code = re.sub(r'(?<!\\)"(\r?\n)"', r'"\\n"', code)
+        code = re.sub(r"(?<!\\)'(\r?\n)'", r"'\\n'", code)
+
+        # ─── Date-as-String Auto-Corrections ───
+        # DuckDB auto-parses CSV date columns to date type.
+        # LLMs (especially DeepSeek) often assume dates are strings.
+        
+        # Fix: .str.to_date() / .str.strptime() → remove (already date type)
+        code = re.sub(
+            r"\.str\.to_date\([^)]*\)",
+            "",
+            code,
+        )
+        code = re.sub(
+            r"\.str\.strptime\([^)]*\)",
+            "",
+            code,
+        )
+        
+        # Fix: .str.starts_with('2025') → .dt.year() == 2025
+        code = re.sub(
+            r"\.str\.starts_with\(['\"](\d{4})['\"](?:\s*)\)",
+            r".dt.year() == \1",
+            code,
+        )
+        # Fix: .str.contains('2025') → .dt.year() == 2025 (when used with 4-digit year)
+        code = re.sub(
+            r"\.str\.contains\(['\"](\d{4})['\"](?:\s*)\)",
+            r".cast(pl.Utf8).str.contains('\1')",
+            code,
+        )
+
         return code
+
+    def lint_code(self, code: str) -> list[str]:
+        """
+        Pre-execution static analysis. Returns list of warning/error strings.
+        Empty list = code is clean.
+        
+        Checks:
+        1. Python syntax validity (py_compile)
+        2. Common Polars anti-patterns (missing .alias(), blocked libs, pandas syntax)
+        """
+        warnings = []
+
+        # Layer 1: Syntax check via compile()
+        try:
+            compile(code, "<llm_code>", "exec")
+        except SyntaxError as e:
+            warnings.append(f"SYNTAX_ERROR at line {e.lineno}: {e.msg}")
+            return warnings  # No point checking patterns if syntax is broken
+
+        # Layer 2: Anti-pattern detection
+        for pattern, message in self._LINT_PATTERNS:
+            if re.search(pattern, code):
+                warnings.append(message)
+
+        return warnings
 
     def _check_security(self, code: str) -> Optional[str]:
         """Multi-layer security check: string scan + AST validation."""
@@ -273,6 +353,7 @@ class CodeInterpreter:
         self, code: str,
         df: Optional[pl.DataFrame] = None,
         dfs: Optional[Dict[str, pl.DataFrame]] = None,
+        db_path: Optional[str] = None,
         use_subprocess: bool = True,
     ) -> Dict[str, Any]:
         """
@@ -280,14 +361,29 @@ class CodeInterpreter:
         
         Security layers:
         1. Preprocess (auto-correct)
-        2. String-level blocklist
-        3. AST-level validation
-        4. Subprocess isolation (separate process, resource limits)
-        5. Timeout (10s hard limit)
-        6. Output cap (50KB)
+        2. Lint (syntax + pattern check)
+        3. String-level blocklist
+        4. AST-level validation
+        5. Subprocess isolation (separate process, resource limits)
+        6. Timeout (10s hard limit)
+        7. Output cap (50KB)
         """
         # Auto-correct LLM hallucinations
         code = self._preprocess_code(code)
+
+        # Lint gate — catch syntax errors and bad patterns early
+        lint_warnings = self.lint_code(code)
+        if lint_warnings:
+            has_syntax_error = any("SYNTAX_ERROR" in w for w in lint_warnings)
+            if has_syntax_error:
+                return {
+                    "success": False, 
+                    "output": "", 
+                    "error": "LINT FAILED:\n" + "\n".join(lint_warnings),
+                    "lint_warnings": lint_warnings,
+                }
+            # Non-fatal warnings: log but still execute (auto-correct may have fixed it)
+            logger.warning("lint_warnings", warnings=lint_warnings)
 
         # Security gate (string + AST)
         security_error = self._check_security(code)
@@ -295,13 +391,14 @@ class CodeInterpreter:
             return {"success": False, "output": "", "error": security_error}
 
         if use_subprocess:
-            return self._execute_in_subprocess(code, df, dfs)
+            return self._execute_in_subprocess(code, df, dfs, db_path)
         else:
-            return self._execute_inline(code, df, dfs)
+            return self._execute_inline(code, df, dfs, db_path)
 
     def _execute_in_subprocess(
         self, code: str,
         df: Optional[pl.DataFrame], dfs: Optional[Dict[str, pl.DataFrame]],
+        db_path: Optional[str],
     ) -> Dict[str, Any]:
         """Execute in an isolated subprocess with resource limits."""
         # Serialize data to JSON for subprocess
@@ -314,7 +411,7 @@ class CodeInterpreter:
         result_queue = multiprocessing.Queue()
         process = multiprocessing.Process(
             target=_worker,
-            args=(code, json.dumps(env_data, default=str), result_queue),
+            args=(code, json.dumps(env_data, default=str), result_queue, db_path),
         )
         process.start()
         process.join(timeout=EXEC_TIMEOUT_SECONDS)
@@ -340,6 +437,7 @@ class CodeInterpreter:
     def _execute_inline(
         self, code: str,
         df: Optional[pl.DataFrame], dfs: Optional[Dict[str, pl.DataFrame]],
+        db_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Fallback: execute in-process (for testing or simple cases)."""
         safe_globals = {
@@ -357,6 +455,14 @@ class CodeInterpreter:
         if dfs:
             locals_dict.update(dfs)
             locals_dict["dfs"] = dfs
+        
+        if db_path:
+            try:
+                locals_dict["db"] = duckdb.connect(database=db_path, read_only=True)
+                safe_globals["duckdb"] = duckdb
+            except Exception as e:
+                logger.warning(f"Failed to connect to DuckDB file {db_path} inline: {e}")
+                locals_dict["db"] = duckdb.connect(database=":memory:")
 
         output_buffer = io.StringIO()
         old_stdout = sys.stdout
