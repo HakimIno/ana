@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "postinstall": "mkdir -p node_modules/@myriaddreamin/typst.react/dist && cp src/app/typst/styles/typst.css node_modules/@myriaddreamin/typst.react/dist/typst.css && cp node_modules/@myriaddreamin/typst-ts-renderer/pkg/typst_ts_renderer_bg.wasm public/ && cp node_modules/@myriaddreamin/typst-ts-web-compiler/pkg/typst_ts_web_compiler_bg.wasm public/ || true"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
