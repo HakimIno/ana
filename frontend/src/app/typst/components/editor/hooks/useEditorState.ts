@@ -13,11 +13,13 @@ import { getLineNumber } from '../utils';
 interface UseEditorStateProps {
   initialSource: string;
   onChange: (source: string) => void;
+  externalSource?: string;
 }
 
 export const useEditorState = ({
   initialSource,
   onChange,
+  externalSource,
 }: UseEditorStateProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -70,6 +72,25 @@ export const useEditorState = ({
       }
     };
   }, [source]);
+
+  // Handle external source push (e.g. from PDF upload)
+  // When externalSource changes, override internal editor content immediately
+  useEffect(() => {
+    if (externalSource === undefined || externalSource === sourceRef.current) return;
+
+    // Update React state
+    setSourceInternal(externalSource);
+    sourceRef.current = externalSource;
+
+    // Directly update textarea DOM value for immediate visual feedback
+    if (textareaRef.current) {
+      textareaRef.current.value = externalSource;
+      textareaRef.current.setSelectionRange(0, 0);
+    }
+
+    // Notify compiler immediately (no debounce needed — user didn't type this)
+    onChange(externalSource);
+  }, [externalSource, onChange]);
 
   // Stable setSource - immediate state update, debounced parent notification
   const setSource = useCallback(

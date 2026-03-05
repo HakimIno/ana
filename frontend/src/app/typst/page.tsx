@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { Editor, Preview, ResizableSplit } from './components';
 import { DEFAULT_TYPST_SOURCE } from './config';
 import { useTypstCompiler } from './hooks/useTypstCompiler';
@@ -9,16 +9,6 @@ import { configureRenderer } from './lib/renderer-config';
 // Configure renderer WASM once at module load
 configureRenderer();
 
-// Static styles - defined outside component to avoid recreation
-const CONTAINER_STYLE = {
-  width: '100%',
-  height: '100vh',
-  display: 'flex',
-  flexDirection: 'column' as const,
-  fontFamily: 'system-ui, -apple-system, sans-serif',
-  padding: '12px',
-} as const;
-
 const TypstPage = memo(() => {
   const { onSourceChange, artifact, error, isCompiling, exportPdf } =
     useTypstCompiler({
@@ -26,14 +16,27 @@ const TypstPage = memo(() => {
       debounceMs: 500,
     });
 
-  // Memoize Editor props that shouldn't change
+  // Track source generated externally (e.g. PDF upload) to push into Editor
+  const [generatedSource, setGeneratedSource] = useState<string | undefined>(undefined);
+
+  // Called by PdfUploader — update compiler AND push into Editor
+  const handleGenerated = useCallback(
+    (typstCode: string) => {
+      setGeneratedSource(typstCode);
+      onSourceChange(typstCode);
+    },
+    [onSourceChange]
+  );
+
+  // Memoize Editor props — only change when generated source or callbacks change
   const editorProps = useMemo(
     () => ({
       initialSource: DEFAULT_TYPST_SOURCE,
       onChange: onSourceChange,
+      externalSource: generatedSource,
       fileName: 'main.typ',
     }),
-    [onSourceChange]
+    [onSourceChange, generatedSource]
   );
 
   // Memoize Preview props
@@ -42,18 +45,24 @@ const TypstPage = memo(() => {
       artifact,
       error,
       isCompiling,
+      onGenerated: handleGenerated,
       onExportPdf: exportPdf,
     }),
-    [artifact, error, isCompiling, exportPdf]
+    [artifact, error, isCompiling, handleGenerated, exportPdf]
   );
 
   return (
-    <div style={CONTAINER_STYLE} className="bg-primary">
-      <ResizableSplit
-        left={<Editor {...editorProps} />}
-        right={<Preview {...previewProps} />}
-        style={{ flex: 1 }}
-      />
+    <div className="arc-shell font-sans antialiased">
+      <div className="arc-window flex flex-col p-4 gap-4">
+        {/* Editor & Preview Split */}
+        <div className="flex-1 min-h-0 bg-gray-50/50 rounded-2xl border border-gray-100 overflow-hidden shadow-inner">
+          <ResizableSplit
+            left={<Editor {...editorProps} />}
+            right={<Preview {...previewProps} />}
+            style={{ flex: 1, height: '100%' }}
+          />
+        </div>
+      </div>
     </div>
   );
 });

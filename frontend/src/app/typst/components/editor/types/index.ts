@@ -4,6 +4,8 @@ export interface EditorProps {
   initialSource: string;
   /** Callback when source changes - for external compilation */
   onChange: (source: string) => void;
+  /** When set, pushes new content into the editor from outside (e.g. PDF upload) */
+  externalSource?: string;
   fileName?: string;
 }
 

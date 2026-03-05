@@ -8,24 +8,50 @@ export const previewStyles = `
   min-height: 100% !important;
   width: 100% !important;
 }
-/* Force responsive scaling for Typst output */
+/* Force pages to stack vertically */
 .typst-doc, .typst-app {
   width: 100% !important;
   height: auto !important;
-  min-height: 0 !important; /* Allow shrinking */
+  min-height: 0 !important;
   display: flex !important;
-  justify-content: center !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 16px !important;
 }
 
-/* Target SVG deeply to override any library styles */
+/* Each page: clip overflow so text layers don't bleed out */
+.typst-page, .typst-dom-page {
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+/* Each page SVG: full width up to A4-like max, drop shadow */
 .preview-container svg,
 .typst-doc svg,
 .typst-app svg {
   width: 100% !important;
   height: auto !important;
-  max-width: 100% !important;
+  max-width: 900px !important;
   display: block !important;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* Add subtle shadow to page */
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* ── Hide the Typst accessibility/text-selection overlay layers ──────────
+   These layers exist for copy-paste and screen readers, but they render
+   as visible "ghost text" behind the SVG pages. Hide visually, keep in DOM. */
+.typst-html-semantics,
+.typst-content-hint,
+.typst-content-fallback,
+.typst-content-group {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+/* Allow text selection to still work on the typst-text spans */
+.typst-text {
+  color: transparent !important;
+  position: absolute !important;
 }
 
 

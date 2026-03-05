@@ -38,8 +38,8 @@ const EDITOR_TEXTAREA_CONTAINER_STYLE = {
 } as const;
 
 export const Editor = memo(
-  ({ initialSource, onChange, fileName = 'main.typ' }: EditorProps) => {
-    // Internal state management - Editor is uncontrolled
+  ({ initialSource, onChange, externalSource, fileName = 'main.typ' }: EditorProps) => {
+    // Internal state management - Editor accepts external source pushes
     const {
       textareaRef,
       source,
@@ -49,7 +49,7 @@ export const Editor = memo(
       lineCount,
       handleCursorChange,
       getState,
-    } = useEditorState({ initialSource, onChange });
+    } = useEditorState({ initialSource, onChange, externalSource });
 
     // Scroll synchronization
     const { highlightRef, lineNumbersRef } = useEditorScroll({ textareaRef });
@@ -97,12 +97,12 @@ export const Editor = memo(
       </div>
     );
   },
-  // Custom comparison - Editor never needs to re-render from parent
-  // because it manages its own internal state
+  // Custom comparison - only re-render when fileName, onChange, or externalSource changes
   (prevProps, nextProps) => {
     return (
       prevProps.fileName === nextProps.fileName &&
-      prevProps.onChange === nextProps.onChange
+      prevProps.onChange === nextProps.onChange &&
+      prevProps.externalSource === nextProps.externalSource
     );
   }
 );

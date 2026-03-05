@@ -27,7 +27,7 @@ const areArtifactsEqual = (
 };
 
 export const Preview = memo(
-  ({ artifact, error, isCompiling, onExportPdf }: PreviewProps) => {
+  ({ artifact, error, isCompiling, onGenerated, onExportPdf }: PreviewProps) => {
     const contentRef = useRef<HTMLDivElement>(null);
     const rafIdRef = useRef<number | null>(null);
 
@@ -85,6 +85,7 @@ export const Preview = memo(
           onZoomIn={handleZoomIn}
           onZoomOut={handleZoomOut}
           onResetZoom={handleResetZoom}
+          onSourceChange={onGenerated}
           onExportPdf={onExportPdf}
         />
         <div

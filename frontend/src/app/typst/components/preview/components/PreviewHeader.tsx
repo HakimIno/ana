@@ -1,6 +1,7 @@
 'use client';
 
 import { memo } from 'react';
+import { PdfUploader } from '../..';
 
 interface PreviewHeaderProps {
   isCompiling: boolean;
@@ -9,6 +10,7 @@ interface PreviewHeaderProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onResetZoom: () => void;
+  onSourceChange: (source: string) => void;
   onExportPdf?: () => void;
 }
 
@@ -20,6 +22,7 @@ export const PreviewHeader = memo(
     onZoomIn,
     onZoomOut,
     onResetZoom,
+    onSourceChange,
     onExportPdf,
   }: PreviewHeaderProps) => {
     return (
@@ -52,6 +55,7 @@ export const PreviewHeader = memo(
               <span>Compiling...</span>
             </>
           )}
+          <PdfUploader onGenerated={onSourceChange} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {hasArtifact && <span style={{ color: '#858585' }}>01 of 01</span>}
